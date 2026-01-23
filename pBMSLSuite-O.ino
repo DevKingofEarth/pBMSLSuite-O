@@ -16,7 +16,10 @@
 #define BALANCE2_PIN 17    // Cell 2 balance resistor
 #define BALANCE3_PIN 18    // Cell 3 balance resistor
 #define BALANCE4_PIN 19    // Cell 4 balance resistor
-#define STATUS_LED_PIN 2   // BMS state indication
+#define STATUS_LED_PIN 22  // BMS state indication (changed from GPIO 2 to avoid conflict)
+#define SR_DATA_PIN    14  // Shift register data (SR1.DS)
+#define SR_CLOCK_PIN   13  // Shift register clock (SR1.SHCP)
+#define SR_LATCH_PIN   2   // Shift register latch (SR1.STCP) - now free
 
 // NTC Thermistor Configuration (Steinhart-Hart)
 #define NTC_NOMINAL_RESISTANCE 10000.0f
@@ -140,6 +143,11 @@ public:
          
          // Initialize status LED
          pinMode(STATUS_LED_PIN, OUTPUT);
+
+         // Initialize shift register pins for LED bar graph
+         pinMode(SR_DATA_PIN, OUTPUT);
+         pinMode(SR_CLOCK_PIN, OUTPUT);
+         pinMode(SR_LATCH_PIN, OUTPUT);
          
          Serial.begin(115200);
          Serial.println("pBMSLSuite-O v1.0 - Portable BMS Lab Suite");
@@ -379,14 +387,17 @@ private:
                 break;
         }
         
-        // Control balancing
-        digitalWrite(BALANCE1_PIN, (cellVoltages[0] > BALANCE_THRESHOLD && currentState == BALANCING) ? HIGH : LOW);
-        digitalWrite(BALANCE2_PIN, (cellVoltages[1] > BALANCE_THRESHOLD && currentState == BALANCING) ? HIGH : LOW);
-        digitalWrite(BALANCE3_PIN, (cellVoltages[2] > BALANCE_THRESHOLD && currentState == BALANCING) ? HIGH : LOW);
-        digitalWrite(BALANCE4_PIN, (cellVoltages[3] > BALANCE_THRESHOLD && currentState == BALANCING) ? HIGH : LOW);
-        
-        // Status LED
-        digitalWrite(STATUS_LED_PIN, currentState == FAULT ? (millis() % 500 < 250 ? HIGH : LOW) : HIGH);
+         // Control balancing
+         digitalWrite(BALANCE1_PIN, (cellVoltages[0] > BALANCE_THRESHOLD && currentState == BALANCING) ? HIGH : LOW);
+         digitalWrite(BALANCE2_PIN, (cellVoltages[1] > BALANCE_THRESHOLD && currentState == BALANCING) ? HIGH : LOW);
+         digitalWrite(BALANCE3_PIN, (cellVoltages[2] > BALANCE_THRESHOLD && currentState == BALANCING) ? HIGH : LOW);
+         digitalWrite(BALANCE4_PIN, (cellVoltages[3] > BALANCE_THRESHOLD && currentState == BALANCING) ? HIGH : LOW);
+
+         // Control LED bar graph (10-segment) based on SoC
+         updateLEDbarGraph();
+
+         // Status LED
+         digitalWrite(STATUS_LED_PIN, currentState == FAULT ? (millis() % 500 < 250 ? HIGH : LOW) : HIGH);
     }
     
     void checkFaults() {
@@ -525,6 +536,34 @@ private:
              case FAULT_UT: Serial.print("UNDER-TEMPERATURE (<0°C)"); break;
              default: Serial.print("NONE");
          }
+     }
+
+     // ============ LED Bar Graph Control ============
+     void updateLEDbarGraph() {
+         // Map SoC (0-100%) to LED bar segments (0-10)
+         int segments = map(estimatedSoC, 0, 100, 0, 10);
+
+         // Create 16-bit pattern for two cascaded shift registers
+         // SR1: bits 0-7 (segments 1-8)
+         // SR2: bits 8-15 (segments 9-10, plus unused bits)
+         uint16_t pattern = 0;
+
+         // Light up segments from bottom to top based on SoC
+         for (int i = 0; i < segments; i++) {
+             pattern |= (1 << i);  // Set bit i
+         }
+
+         // Send pattern to shift registers
+         digitalWrite(SR_LATCH_PIN, LOW);  // Disable output
+
+         // Send 16 bits (MSB first)
+         for (int i = 15; i >= 0; i--) {
+             digitalWrite(SR_DATA_PIN, (pattern & (1 << i)) ? HIGH : LOW);
+             digitalWrite(SR_CLOCK_PIN, HIGH);
+             digitalWrite(SR_CLOCK_PIN, LOW);
+         }
+
+         digitalWrite(SR_LATCH_PIN, HIGH);  // Enable output
      }
 };
 
