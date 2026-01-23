@@ -108,6 +108,7 @@ float temperature = 25.0f;
 float loadCurrent = 0.0f;
 float busVoltage = 0.0f;      // From INA219 (pack voltage)
 float shuntCurrent = 0.0f;    // From INA219 (charge/discharge current)
+float busPower = 0.0f;        // From INA219 (power consumption)
 float estimatedSoC = 100.0f;
 float estimatedSoH = 100.0f;
 
@@ -315,9 +316,39 @@ public:
              faultSampleCount = 0;
              Serial.println("✅ Injected fault manually cleared");
          }
-     }
-    
-private:
+      }
+
+      // ============ Stepper Motor Control ============
+      void initStepperMotor() {
+          pinMode(STEPPER_A1_PLUS, OUTPUT);
+          pinMode(STEPPER_A1_MINUS, OUTPUT);
+          pinMode(STEPPER_A2_PLUS, OUTPUT);
+          pinMode(STEPPER_A2_MINUS, OUTPUT);
+          pinMode(STEPPER_B1_PLUS, OUTPUT);
+          pinMode(STEPPER_B1_MINUS, OUTPUT);
+          pinMode(STEPPER_B2_PLUS, OUTPUT);
+          pinMode(STEPPER_B2_MINUS, OUTPUT);
+
+          stopStepperMotor();  // Start with motor stopped
+      }
+
+      void setStepperLoad(int load) {
+          stepperSpeed = constrain(load, 0, 100);  // 0-100% load
+      }
+
+      void stopStepperMotor() {
+          digitalWrite(STEPPER_A1_PLUS, LOW);
+          digitalWrite(STEPPER_A1_MINUS, LOW);
+          digitalWrite(STEPPER_A2_PLUS, LOW);
+          digitalWrite(STEPPER_A2_MINUS, LOW);
+          digitalWrite(STEPPER_B1_PLUS, LOW);
+          digitalWrite(STEPPER_B1_MINUS, LOW);
+          digitalWrite(STEPPER_B2_PLUS, LOW);
+          digitalWrite(STEPPER_B2_MINUS, LOW);
+          stepperSpeed = 0;
+      }
+
+ private:
      void readSensors() {
           // Read cell voltages with filtering
           float rawV1 = analogRead(CELL1_PIN) * (V_REF / ADC_MAX_VALUE);
@@ -331,20 +362,7 @@ private:
               rawV2 *= VOLTAGE_DIVIDER_SCALE;
               rawV3 *= VOLTAGE_DIVIDER_SCALE;
               rawV4 *= VOLTAGE_DIVIDER_SCALE;
-          }
-          
-          cellVoltages[0] = cellFilters[0].add(rawV1);
-          cellVoltages[1] = cellFilters[1].add(rawV2);
-          cellVoltages[2] = cellFilters[2].add(rawV3);
-          cellVoltages[3] = cellFilters[3].add(rawV4);
-          
-           // Read temperature using Steinhart-Hart
-           float tempVoltage = analogRead(TEMP_PIN) * (V_REF / ADC_MAX_VALUE);
-           temperature = calculateTemperatureNTC(tempVoltage);
-           
-           // Read current from INA219 if available
-           readCurrentSensor();
-      }
+       }
          
          cellVoltages[0] = cellFilters[0].add(rawV1);
          cellVoltages[1] = cellFilters[1].add(rawV2);
@@ -654,35 +672,7 @@ private:
           digitalWrite(SR_LATCH_PIN, HIGH);  // Enable output
       }
 
-      // ============ Stepper Motor Control ============
-      void initStepperMotor() {
-          pinMode(STEPPER_A1_PLUS, OUTPUT);
-          pinMode(STEPPER_A1_MINUS, OUTPUT);
-          pinMode(STEPPER_A2_PLUS, OUTPUT);
-          pinMode(STEPPER_A2_MINUS, OUTPUT);
-          pinMode(STEPPER_B1_PLUS, OUTPUT);
-          pinMode(STEPPER_B1_MINUS, OUTPUT);
-          pinMode(STEPPER_B2_PLUS, OUTPUT);
-          pinMode(STEPPER_B2_MINUS, OUTPUT);
 
-          stopStepperMotor();  // Start with motor stopped
-      }
-
-      void setStepperLoad(int load) {
-          stepperSpeed = constrain(load, 0, 100);  // 0-100% load
-      }
-
-      void stopStepperMotor() {
-          digitalWrite(STEPPER_A1_PLUS, LOW);
-          digitalWrite(STEPPER_A1_MINUS, LOW);
-          digitalWrite(STEPPER_A2_PLUS, LOW);
-          digitalWrite(STEPPER_A2_MINUS, LOW);
-          digitalWrite(STEPPER_B1_PLUS, LOW);
-          digitalWrite(STEPPER_B1_MINUS, LOW);
-          digitalWrite(STEPPER_B2_PLUS, LOW);
-          digitalWrite(STEPPER_B2_MINUS, LOW);
-          stepperSpeed = 0;
-      }
 
        void simulateMotorLoadEffects() {
            if (stepperSpeed > 0) {
