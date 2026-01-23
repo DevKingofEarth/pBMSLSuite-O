@@ -1,0 +1,4 @@
+[wokwi]
+version = 1
+firmware = 'build/pBMSLSuite-O.ino.bin'
+elf = 'build/pBMSLSuite-O.ino.elf'
