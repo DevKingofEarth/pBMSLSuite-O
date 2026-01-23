@@ -95,7 +95,6 @@ MovingAverageFilter cellFilters[4];
 MovingAverageFilter tempFilter;
 float cellVoltages[4] = {0};
 float temperature = 25.0f;
-float stressInjection = 0.0f;  // Slider pot: 0-100% thermal stress multiplier
 float loadCurrent = 0.0f;
 float busVoltage = 0.0f;      // From INA219 (pack voltage)
 float shuntCurrent = 0.0f;    // From INA219 (charge/discharge current)
@@ -299,20 +298,12 @@ private:
           cellVoltages[2] = cellFilters[2].add(rawV3);
           cellVoltages[3] = cellFilters[3].add(rawV4);
           
-          // Read temperature using Steinhart-Hart
-          float tempVoltage = analogRead(TEMP_PIN) * (V_REF / ADC_MAX_VALUE);
-          float baseTemp = calculateTemperatureNTC(tempVoltage);
-          
-          // Read slider pot for thermal stress injection (0-3.3V → 0-100%)
-          float stressRaw = analogRead(VP) * (V_REF / ADC_MAX_VALUE);
-          stressInjection = (stressRaw / V_REF) * 100.0f;  // Map to 0-100%
-          
-          // Apply stress multiplier to temperature (simulates external load/environment)
-          // Stress injection adds synthetic thermal load: +60°C max at 100% slider
-          temperature = baseTemp + (stressInjection * 0.6f);
-          
-          // Read current from INA219 if available
-          readCurrentSensor();
+           // Read temperature using Steinhart-Hart
+           float tempVoltage = analogRead(TEMP_PIN) * (V_REF / ADC_MAX_VALUE);
+           temperature = calculateTemperatureNTC(tempVoltage);
+           
+           // Read current from INA219 if available
+           readCurrentSensor();
       }
          
          cellVoltages[0] = cellFilters[0].add(rawV1);
@@ -471,8 +462,7 @@ private:
          Serial.print(temperature, 1);
          Serial.print("°C ");
          Serial.println(getTempStatus());
-         Serial.printf("   Stress Injection (Slider): %.1f%% (0%% = No Stress, 100%% = +60°C)\n", stressInjection);
-        
+         
         // Battery Status
         Serial.println("───────────────────────────────────────────────────────────");
         Serial.println("🔋 BATTERY STATUS:");
@@ -562,32 +552,32 @@ private:
      }
 
      // ============ LED Bar Graph Control ============
-     void updateLEDbarGraph() {
-         // Map SoC (0-100%) to LED bar segments (0-10)
-         int segments = map(estimatedSoC, 0, 100, 0, 10);
+      void updateLEDbarGraph() {
+          // Map SoC (0-100%) to LED bar segments (0-10)
+          int segments = map(estimatedSoC, 0, 100, 0, 10);
 
-         // Create 16-bit pattern for two cascaded shift registers
-         // SR1: bits 0-7 (segments 1-8)
-         // SR2: bits 8-15 (segments 9-10, plus unused bits)
-         uint16_t pattern = 0;
+          // Create 16-bit pattern for two cascaded shift registers
+          // SR1: bits 0-7 (segments 1-8)
+          // SR2: bits 8-15 (segments 9-10, plus unused bits)
+          uint16_t pattern = 0;
 
-         // Light up segments from bottom to top based on SoC
-         for (int i = 0; i < segments; i++) {
-             pattern |= (1 << i);  // Set bit i
-         }
+          // Light up segments from bottom to top based on SoC
+          for (int i = 0; i < segments; i++) {
+              pattern |= (1 << i);  // Set bit i
+          }
 
-         // Send pattern to shift registers
-         digitalWrite(SR_LATCH_PIN, LOW);  // Disable output
+          // Send pattern to shift registers
+          digitalWrite(SR_LATCH_PIN, LOW);  // Disable output
 
-         // Send 16 bits (MSB first)
-         for (int i = 15; i >= 0; i--) {
-             digitalWrite(SR_DATA_PIN, (pattern & (1 << i)) ? HIGH : LOW);
-             digitalWrite(SR_CLOCK_PIN, HIGH);
-             digitalWrite(SR_CLOCK_PIN, LOW);
-         }
+          // Send 16 bits (LSB first - corrected for this circuit)
+          for (int i = 0; i < 16; i++) {
+              digitalWrite(SR_DATA_PIN, (pattern & (1 << i)) ? HIGH : LOW);
+              digitalWrite(SR_CLOCK_PIN, HIGH);
+              digitalWrite(SR_CLOCK_PIN, LOW);
+          }
 
-         digitalWrite(SR_LATCH_PIN, HIGH);  // Enable output
-     }
+          digitalWrite(SR_LATCH_PIN, HIGH);  // Enable output
+      }
 };
 
 PBMSController bmsController;

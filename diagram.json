@@ -72,13 +72,6 @@
       "attrs": { "value": "220" }
     },
     {
-      "type": "wokwi-led",
-      "id": "led1",
-      "top": -42,
-      "left": 445.8,
-      "attrs": { "color": "red", "flip": "1" }
-    },
-    {
       "type": "wokwi-led-bar-graph",
       "id": "bargraph1",
       "top": 273.6,
@@ -91,14 +84,6 @@
       "top": -42,
       "left": 483.8,
       "attrs": { "color": "orange" }
-    },
-    {
-      "type": "wokwi-slide-potentiometer",
-      "id": "pot5",
-      "top": 9.6,
-      "left": 546.4,
-      "rotate": 90,
-      "attrs": { "travelLength": "30" }
     },
     {
       "type": "wokwi-resistor",
@@ -220,12 +205,8 @@
     [ "bb1:bn.11", "r4:2", "black", [ "v0" ] ],
     [ "bb1:bn.13", "r5:2", "black", [ "v0" ] ],
     [ "esp:25", "pot3:SIG", "green", [ "v0", "h-47.85", "v259.2", "h412.8" ] ],
-    [ "esp:26", "pot2:SIG", "green", [ "h-38.25", "v259.2", "h489.6", "v-48" ] ],
-    [ "esp:2", "bb1:20b.i", "limegreen", [ "h0" ] ],
-    [ "bb1:bn.24", "pot5:GND", "black", [ "v27.5", "h116.8" ] ],
-    [ "bb1:bp.21", "pot5:VCC", "red", [ "v-202.5", "h145.6" ] ],
-    [ "esp:VP", "pot5:SIG", "green", [ "h76.95", "v-28.8", "h469.6" ] ],
-    [ "bb1:bp.18", "bb1:21b.g", "black", [ "v0" ] ],
+     [ "esp:26", "pot2:SIG", "green", [ "h-38.25", "v259.2", "h489.6", "v-48" ] ],
+     [ "bb1:bp.18", "bb1:21b.g", "black", [ "v0" ] ],
     [ "bb1:20b.f", "bb1:20t.d", "limegreen", [ "v0" ] ],
     [ "bb1:bn.20", "bb1:24b.i", "black", [ "v0" ] ],
     [ "esp:22", "bb1:25t.d", "yellow", [ "h48", "v9.6", "h268.8" ] ],
@@ -274,9 +255,7 @@
     [ "r5:2", "bb1:16b.i", "", [ "$bb" ] ],
     [ "r6:1", "bb1:21t.b", "", [ "$bb" ] ],
     [ "r6:2", "bb1:21b.f", "", [ "$bb" ] ],
-    [ "led1:A", "bb1:20t.a", "", [ "$bb" ] ],
-    [ "led1:C", "bb1:21t.a", "", [ "$bb" ] ],
-    [ "led2:A", "bb1:25t.a", "", [ "$bb" ] ],
+     [ "led2:A", "bb1:25t.a", "", [ "$bb" ] ],
     [ "led2:C", "bb1:24t.a", "", [ "$bb" ] ],
     [ "r7:1", "bb1:24t.b", "", [ "$bb" ] ],
     [ "r7:2", "bb1:24b.f", "", [ "$bb" ] ],

@@ -1,10 +1,14 @@
-# 🧪 LED Bar Graph & Slider Pot Testing Guide
+# 🧪 LED Bar Graph Testing Guide (Archived)
+
+⚠️ **NOTE (Jan 23, 2026)**: Slider potentiometer has been **REMOVED** from this project. It was a fake feature that didn't actually stress the battery (no current draw). Only LED Bar Graph and Fault Injection tests are relevant now.
 
 ## Overview
 This document provides step-by-step instructions to test:
-1. **LED Bar Graph** - Verifies 10-segment display responds to SoC changes
-2. **Slider Potentiometer** - Verifies thermal stress injection works
-3. **Fault Injection** - Verifies fault detection and LED response
+1. **LED Bar Graph** - Verifies 10-segment display responds to SoC changes ✅ STILL VALID
+2. ~~Slider Potentiometer~~ - **REMOVED** (was fake thermal stress injection) ❌ ARCHIVED
+3. **Fault Injection** - Verifies fault detection and LED response ✅ STILL VALID
+
+See `WOKWI_TEST_EXECUTION_PLAN.md` for updated testing guide.
 
 ---
 
