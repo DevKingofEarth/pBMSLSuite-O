@@ -21,6 +21,13 @@
 #define SR_CLOCK_PIN   13  // Shift register clock (SR1.SHCP)
 #define SR_LATCH_PIN   2   // Shift register latch (SR1.STCP) - now free
 
+// Stepper Motor for Load Testing (Biaxial Stepper)
+#define STEPPER1_PIN   4   // Stepper motor coil A1
+#define STEPPER2_PIN   5   // Stepper motor coil A2
+#define STEPPER3_PIN   12  // Stepper motor coil B1
+#define STEPPER4_PIN   15  // Stepper motor coil B2
+#define STEPPER_ENABLE 23  // Stepper motor enable pin
+
 // NTC Thermistor Configuration (Steinhart-Hart)
 #define NTC_NOMINAL_RESISTANCE 10000.0f
 #define NTC_BETA_COEFFICIENT 3950.0f
@@ -98,9 +105,24 @@ float temperature = 25.0f;
 float loadCurrent = 0.0f;
 float busVoltage = 0.0f;      // From INA219 (pack voltage)
 float shuntCurrent = 0.0f;    // From INA219 (charge/discharge current)
-float busPower = 0.0f;        // From INA219 (power dissipation)
 float estimatedSoC = 100.0f;
 float estimatedSoH = 100.0f;
+
+// Stepper Motor Control for Load Testing
+int stepperSpeed = 0;         // 0-100% speed for load control
+int stepperDirection = 1;     // 1 = forward, -1 = reverse
+unsigned long lastStepperStep = 0;
+int stepperStepIndex = 0;
+const int stepperSteps[8][4] = {
+    {1, 0, 0, 0},  // Step 1
+    {1, 1, 0, 0},  // Step 2
+    {0, 1, 0, 0},  // Step 3
+    {0, 1, 1, 0},  // Step 4
+    {0, 0, 1, 0},  // Step 5
+    {0, 0, 1, 1},  // Step 6
+    {0, 0, 0, 1},  // Step 7
+    {1, 0, 0, 1}   // Step 8
+};
 BMSState currentState = IDLE;
 FaultType currentFault = FAULT_NONE;
 unsigned long lastCSVTime = 0;
@@ -144,10 +166,13 @@ public:
          // Initialize status LED
          pinMode(STATUS_LED_PIN, OUTPUT);
 
-         // Initialize shift register pins for LED bar graph
-         pinMode(SR_DATA_PIN, OUTPUT);
-         pinMode(SR_CLOCK_PIN, OUTPUT);
-         pinMode(SR_LATCH_PIN, OUTPUT);
+          // Initialize shift register pins for LED bar graph
+          pinMode(SR_DATA_PIN, OUTPUT);
+          pinMode(SR_CLOCK_PIN, OUTPUT);
+          pinMode(SR_LATCH_PIN, OUTPUT);
+
+          // Initialize stepper motor for load testing
+          initStepperMotor();
          
          Serial.begin(115200);
          Serial.println("pBMSLSuite-O v1.0 - Portable BMS Lab Suite");
@@ -205,13 +230,16 @@ public:
          // Fault detection
          checkFaults();
          
-         // CSV logging (1Hz)
-         if (millis() - lastCSVTime > 1000) {
-             logCSV();
-             lastCSVTime = millis();
-         }
-         
-         delay(100);  // 10Hz loop
+          // Update stepper motor for load testing
+          updateStepperMotor();
+
+          // CSV logging (1Hz)
+          if (millis() - lastCSVTime > 1000) {
+              logCSV();
+              lastCSVTime = millis();
+          }
+
+          delay(100);  // 10Hz loop
      }
      
      // ============ Fault Injection Methods ============
@@ -345,11 +373,19 @@ private:
     void updateSoC() {
         float avgVoltage = (cellVoltages[0] + cellVoltages[1] + cellVoltages[2] + cellVoltages[3]) / 4.0f;
         
-        // Simple voltage-based SoC estimation
+        // Enhanced SoC estimation with load consideration
         if (avgVoltage >= 4.20f) estimatedSoC = 100.0f;
         else if (avgVoltage <= 3.00f) estimatedSoC = 0.0f;
         else {
             estimatedSoC = ((avgVoltage - 3.00f) / 1.20f) * 100.0f;
+        }
+
+        // Apply current-based discharge effect (stepper motor load)
+        if (stepperSpeed > 0) {
+            // Simulate discharge: 1% SoC loss per minute at 100% load
+            float dischargeRate = (stepperSpeed / 100.0f) * (1.0f / 60.0f); // % per second
+            estimatedSoC -= dischargeRate * 0.1f; // 100ms loop = 0.1 seconds
+            estimatedSoC = max(estimatedSoC, 0.0f);
         }
         
         // Simple SoH estimation (degrades with extreme temps)
@@ -466,7 +502,12 @@ private:
         // Battery Status
         Serial.println("───────────────────────────────────────────────────────────");
         Serial.println("🔋 BATTERY STATUS:");
-        Serial.printf("   SoC: %.1f%% | SoH: %.1f%%\n", estimatedSoC, estimatedSoH);
+        if (stepperSpeed > 0) {
+            Serial.printf("   ⚙️  Stepper Motor: Running (%d%% load)\n", stepperSpeed);
+        } else {
+            Serial.println("   ⚙️  Stepper Motor: Stopped");
+        }
+        Serial.printf("   Min Cell SoC: %.1f%% | SoH: %.1f%% | Load: %d%%\n", estimatedSoC, estimatedSoH, stepperSpeed);
         
         // State Machine
         Serial.println("───────────────────────────────────────────────────────────");
@@ -551,10 +592,21 @@ private:
          }
      }
 
-     // ============ LED Bar Graph Control ============
-      void updateLEDbarGraph() {
-          // Map SoC (0-100%) to LED bar segments (0-10)
-          int segments = map(estimatedSoC, 0, 100, 0, 10);
+      // ============ LED Bar Graph Control ============
+       void updateLEDbarGraph() {
+          // Find minimum cell voltage for critical cell indication
+          float minCellVoltage = *std::min_element(cellVoltages, cellVoltages + 4);
+          float minCellSoC = 0.0f;
+
+          // Calculate SoC for minimum cell (more accurate than average)
+          if (minCellVoltage >= 4.20f) minCellSoC = 100.0f;
+          else if (minCellVoltage <= 3.00f) minCellSoC = 0.0f;
+          else {
+              minCellSoC = ((minCellVoltage - 3.00f) / 1.20f) * 100.0f;
+          }
+
+          // Map minimum cell SoC to LED bar segments (0-10)
+          int segments = map(minCellSoC, 0, 100, 0, 10);
 
           // Create 16-bit pattern for two cascaded shift registers
           // SR1: bits 0-7 (segments 1-8)
@@ -577,6 +629,52 @@ private:
           }
 
           digitalWrite(SR_LATCH_PIN, HIGH);  // Enable output
+      }
+
+      // ============ Stepper Motor Control ============
+      void initStepperMotor() {
+          pinMode(STEPPER1_PIN, OUTPUT);
+          pinMode(STEPPER2_PIN, OUTPUT);
+          pinMode(STEPPER3_PIN, OUTPUT);
+          pinMode(STEPPER4_PIN, OUTPUT);
+          pinMode(STEPPER_ENABLE, OUTPUT);
+
+          digitalWrite(STEPPER_ENABLE, LOW);  // Enable stepper motor
+          stopStepperMotor();  // Start with motor stopped
+      }
+
+      void setStepperLoad(int load) {
+          stepperSpeed = constrain(load, 0, 100);  // 0-100% load
+      }
+
+      void stopStepperMotor() {
+          digitalWrite(STEPPER1_PIN, LOW);
+          digitalWrite(STEPPER2_PIN, LOW);
+          digitalWrite(STEPPER3_PIN, LOW);
+          digitalWrite(STEPPER4_PIN, LOW);
+          stepperSpeed = 0;
+      }
+
+      void updateStepperMotor() {
+          if (stepperSpeed == 0) {
+              stopStepperMotor();
+              return;
+          }
+
+          unsigned long currentTime = millis();
+          int stepDelay = map(stepperSpeed, 1, 100, 50, 2);  // Faster at higher speed
+
+          if (currentTime - lastStepperStep >= stepDelay) {
+              // Set coil states for current step
+              digitalWrite(STEPPER1_PIN, stepperSteps[stepperStepIndex][0]);
+              digitalWrite(STEPPER2_PIN, stepperSteps[stepperStepIndex][1]);
+              digitalWrite(STEPPER3_PIN, stepperSteps[stepperStepIndex][2]);
+              digitalWrite(STEPPER4_PIN, stepperSteps[stepperStepIndex][3]);
+
+              // Move to next step
+              stepperStepIndex = (stepperStepIndex + stepperDirection + 8) % 8;
+              lastStepperStep = currentTime;
+          }
       }
 };
 
@@ -611,6 +709,16 @@ void processSerialCommand() {
         }
         else if (command == "CLEAR FAULT") {
             bmsController.clearInjectedFault();
+        }
+        else if (command.startsWith("LOAD ")) {
+            // Format: LOAD 50 (sets load to 50%)
+            int loadValue = command.substring(5).toInt();
+            bmsController.setStepperLoad(loadValue);
+            Serial.printf("\n🔄 Load set to %d%%\n", loadValue);
+        }
+        else if (command == "STOP LOAD") {
+            bmsController.stopStepperMotor();
+            Serial.println("\n⏹️  Load stopped");
         }
     }
 }
