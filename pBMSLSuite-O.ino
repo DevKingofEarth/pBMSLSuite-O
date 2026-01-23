@@ -116,6 +116,15 @@ int stepperSpeed = 0;         // 0-100% speed for load control
 int stepperDirection = 1;     // 1 = forward, -1 = reverse
 unsigned long lastStepperStep = 0;
 int stepperStepIndex = 0;
+int stepDelay = 50;           // Current step delay (ms)
+
+// Motor Load Simulation Variables (Realistic Engineering Approximation)
+int estimated_motor_current_ma = 0;     // 80-450mA based on load
+float estimated_motor_power_w = 0.0f;   // Power consumption
+float soc_decay_rate = 0.0f;            // SoC drain rate (% per minute)
+float motor_heat_generation = 0.0f;     // Temperature rise (°C)
+float motor_step_frequency_hz = 0.0f;   // Step frequency (Hz)
+unsigned long total_motor_steps = 0;     // Cumulative steps executed
 const int stepperSteps[8][4] = {
     {1, 0, 0, 0},  // Step 1
     {1, 1, 0, 0},  // Step 2
@@ -383,13 +392,17 @@ private:
             estimatedSoC = ((avgVoltage - 3.00f) / 1.20f) * 100.0f;
         }
 
-        // Apply current-based discharge effect (stepper motor load)
-        if (stepperSpeed > 0) {
-            // Simulate discharge: 1% SoC loss per minute at 100% load
-            float dischargeRate = (stepperSpeed / 100.0f) * (1.0f / 60.0f); // % per second
-            estimatedSoC -= dischargeRate * 0.1f; // 100ms loop = 0.1 seconds
+        // Apply realistic motor load discharge effect
+        if (soc_decay_rate > 0.0f) {
+            // Convert % per minute to % per second, then per 100ms loop
+            float discharge_per_second = soc_decay_rate / 60.0f;
+            estimatedSoC -= discharge_per_second * 0.1f; // 100ms loop
             estimatedSoC = max(estimatedSoC, 0.0f);
         }
+
+        // Apply motor-generated heat to temperature reading
+        temperature += motor_heat_generation;
+        motor_heat_generation *= 0.95f; // Gradual heat dissipation
         
         // Simple SoH estimation (degrades with extreme temps)
         if (temperature > 45.0f || temperature < 10.0f) {
@@ -502,15 +515,22 @@ private:
          Serial.print("°C ");
          Serial.println(getTempStatus());
          
-        // Battery Status
-        Serial.println("───────────────────────────────────────────────────────────");
-        Serial.println("🔋 BATTERY STATUS:");
-        if (stepperSpeed > 0) {
-            Serial.printf("   ⚙️  Stepper Motor: Running (%d%% load)\n", stepperSpeed);
-        } else {
-            Serial.println("   ⚙️  Stepper Motor: Stopped");
-        }
-        Serial.printf("   Min Cell SoC: %.1f%% | SoH: %.1f%% | Load: %d%%\n", estimatedSoC, estimatedSoH, stepperSpeed);
+         // Battery Status
+         Serial.println("───────────────────────────────────────────────────────────");
+         Serial.println("🔋 BATTERY STATUS:");
+
+         // Enhanced Motor Telemetry
+         if (stepperSpeed > 0) {
+             Serial.printf("   ⚙️  MOTOR LOAD: %d%% | Current: %dmA | Power: %.2fW\n",
+                          stepperSpeed, estimated_motor_current_ma, estimated_motor_power_w);
+             Serial.printf("   ⚙️  Frequency: %.1fHz | Steps: %lu | Runtime: %lus\n",
+                          motor_step_frequency_hz, total_motor_steps, millis() / 1000);
+         } else {
+             Serial.println("   ⚙️  Motor: Stopped | No load");
+         }
+
+         Serial.printf("   Min Cell SoC: %.1f%% | SoH: %.1f%% | SoC Drain: %.2f%%/min\n",
+                      estimatedSoC, estimatedSoH, soc_decay_rate);
         
         // State Machine
         Serial.println("───────────────────────────────────────────────────────────");
@@ -664,28 +684,57 @@ private:
           stepperSpeed = 0;
       }
 
-      void updateStepperMotor() {
-          if (stepperSpeed == 0) {
-              stopStepperMotor();
-              return;
-          }
+       void simulateMotorLoadEffects() {
+           if (stepperSpeed > 0) {
+               // Realistic motor load simulation (engineering approximation)
+               estimated_motor_current_ma = map(stepperSpeed, 1, 100, 80, 450);  // 80-450mA typical stepper range
+               estimated_motor_power_w = (estimated_motor_current_ma / 1000.0f) * 3.3f;  // P = I * V
 
-          unsigned long currentTime = millis();
-          int stepDelay = map(stepperSpeed, 1, 100, 50, 2);  // Faster at higher speed
+               // SoC drain proportional to load (1% per minute at 100% load)
+               soc_decay_rate = (stepperSpeed / 100.0f) * 1.0f;  // 0-1% per minute
 
-          if (currentTime - lastStepperStep >= stepDelay) {
-               // Set coil states for current step using actual biaxial motor pins
-               // Map step pattern [A1+, A1-, A2+, A2-] for biaxial stepper
-               digitalWrite(STEPPER_A1_PLUS,  stepperSteps[stepperStepIndex][0]);
-               digitalWrite(STEPPER_A1_MINUS, stepperSteps[stepperStepIndex][1]);
-               digitalWrite(STEPPER_A2_PLUS,  stepperSteps[stepperStepIndex][2]);
-               digitalWrite(STEPPER_A2_MINUS, stepperSteps[stepperStepIndex][3]);
+               // Motor generates heat at high loads
+               if (stepperSpeed > 70) {
+                   motor_heat_generation += 0.05f;  // 0.05°C per update at high load
+               }
+
+               // Step frequency calculation for telemetry
+               motor_step_frequency_hz = 1000.0f / stepDelay;
+               total_motor_steps++;
+
+           } else {
+               estimated_motor_current_ma = 0;
+               estimated_motor_power_w = 0.0f;
+               soc_decay_rate = 0.0f;
+               motor_heat_generation = 0.0f;
+           }
+       }
+
+       void updateStepperMotor() {
+           if (stepperSpeed == 0) {
+               stopStepperMotor();
+               return;
+           }
+
+           unsigned long currentTime = millis();
+           stepDelay = map(stepperSpeed, 1, 100, 50, 2);  // Faster at higher speed
+
+           if (currentTime - lastStepperStep >= stepDelay) {
+                // Set coil states for current step using actual biaxial motor pins
+                // Map step pattern [A1+, A1-, A2+, A2-] for biaxial stepper
+                digitalWrite(STEPPER_A1_PLUS,  stepperSteps[stepperStepIndex][0]);
+                digitalWrite(STEPPER_A1_MINUS, stepperSteps[stepperStepIndex][1]);
+                digitalWrite(STEPPER_A2_PLUS,  stepperSteps[stepperStepIndex][2]);
+                digitalWrite(STEPPER_A2_MINUS, stepperSteps[stepperStepIndex][3]);
 
               // Move to next step
               stepperStepIndex = (stepperStepIndex + stepperDirection + 8) % 8;
               lastStepperStep = currentTime;
-          }
-      }
+           }
+
+           // Update load simulation every time
+           simulateMotorLoadEffects();
+       }
 };
 
 PBMSController bmsController;
