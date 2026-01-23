@@ -95,6 +95,7 @@ MovingAverageFilter cellFilters[4];
 MovingAverageFilter tempFilter;
 float cellVoltages[4] = {0};
 float temperature = 25.0f;
+float stressInjection = 0.0f;  // Slider pot: 0-100% thermal stress multiplier
 float loadCurrent = 0.0f;
 float busVoltage = 0.0f;      // From INA219 (pack voltage)
 float shuntCurrent = 0.0f;    // From INA219 (charge/discharge current)
@@ -278,20 +279,41 @@ public:
      }
     
 private:
-    void readSensors() {
-         // Read cell voltages with filtering
-         float rawV1 = analogRead(CELL1_PIN) * (V_REF / ADC_MAX_VALUE);
-         float rawV2 = analogRead(CELL2_PIN) * (V_REF / ADC_MAX_VALUE);
-         float rawV3 = analogRead(CELL3_PIN) * (V_REF / ADC_MAX_VALUE);
-         float rawV4 = analogRead(CELL4_PIN) * (V_REF / ADC_MAX_VALUE);
-         
-         // Apply voltage divider correction if enabled (for real hardware)
-         if (USE_VOLTAGE_DIVIDER) {
-             rawV1 *= VOLTAGE_DIVIDER_SCALE;
-             rawV2 *= VOLTAGE_DIVIDER_SCALE;
-             rawV3 *= VOLTAGE_DIVIDER_SCALE;
-             rawV4 *= VOLTAGE_DIVIDER_SCALE;
-         }
+     void readSensors() {
+          // Read cell voltages with filtering
+          float rawV1 = analogRead(CELL1_PIN) * (V_REF / ADC_MAX_VALUE);
+          float rawV2 = analogRead(CELL2_PIN) * (V_REF / ADC_MAX_VALUE);
+          float rawV3 = analogRead(CELL3_PIN) * (V_REF / ADC_MAX_VALUE);
+          float rawV4 = analogRead(CELL4_PIN) * (V_REF / ADC_MAX_VALUE);
+          
+          // Apply voltage divider correction if enabled (for real hardware)
+          if (USE_VOLTAGE_DIVIDER) {
+              rawV1 *= VOLTAGE_DIVIDER_SCALE;
+              rawV2 *= VOLTAGE_DIVIDER_SCALE;
+              rawV3 *= VOLTAGE_DIVIDER_SCALE;
+              rawV4 *= VOLTAGE_DIVIDER_SCALE;
+          }
+          
+          cellVoltages[0] = cellFilters[0].add(rawV1);
+          cellVoltages[1] = cellFilters[1].add(rawV2);
+          cellVoltages[2] = cellFilters[2].add(rawV3);
+          cellVoltages[3] = cellFilters[3].add(rawV4);
+          
+          // Read temperature using Steinhart-Hart
+          float tempVoltage = analogRead(TEMP_PIN) * (V_REF / ADC_MAX_VALUE);
+          float baseTemp = calculateTemperatureNTC(tempVoltage);
+          
+          // Read slider pot for thermal stress injection (0-3.3V → 0-100%)
+          float stressRaw = analogRead(VP) * (V_REF / ADC_MAX_VALUE);
+          stressInjection = (stressRaw / V_REF) * 100.0f;  // Map to 0-100%
+          
+          // Apply stress multiplier to temperature (simulates external load/environment)
+          // Stress injection adds synthetic thermal load: +60°C max at 100% slider
+          temperature = baseTemp + (stressInjection * 0.6f);
+          
+          // Read current from INA219 if available
+          readCurrentSensor();
+      }
          
          cellVoltages[0] = cellFilters[0].add(rawV1);
          cellVoltages[1] = cellFilters[1].add(rawV2);
@@ -443,12 +465,13 @@ private:
                           busVoltage, shuntCurrent, busPower);
          }
         
-        // Temperature
-        Serial.println("───────────────────────────────────────────────────────────");
-        Serial.print("🌡️  Temperature: ");
-        Serial.print(temperature, 1);
-        Serial.print("°C ");
-        Serial.println(getTempStatus());
+         // Temperature
+         Serial.println("───────────────────────────────────────────────────────────");
+         Serial.print("🌡️  Temperature: ");
+         Serial.print(temperature, 1);
+         Serial.print("°C ");
+         Serial.println(getTempStatus());
+         Serial.printf("   Stress Injection (Slider): %.1f%% (0%% = No Stress, 100%% = +60°C)\n", stressInjection);
         
         // Battery Status
         Serial.println("───────────────────────────────────────────────────────────");
