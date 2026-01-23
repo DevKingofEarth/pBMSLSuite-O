@@ -269,25 +269,7 @@
     [ "bargraph1:C5", "gnd1:GND", "black", [ "h0" ] ],
     [ "bargraph1:C4", "gnd1:GND", "black", [ "h0" ] ],
     [ "bargraph1:C3", "gnd1:GND", "black", [ "h0" ] ],
-    [ "bargraph1:C2", "gnd1:GND", "black", [ "h0" ] ],
-    [ "esp:4", "stepper1:A1", "orange", [ "h0" ] ],
-    [ "esp:5", "stepper1:A2", "orange", [ "h0" ] ],
-    [ "esp:12", "stepper1:B1", "orange", [ "h0" ] ],
-    [ "esp:15", "stepper1:B2", "orange", [ "h0" ] ],
-    [ "esp:23", "stepper1:ENABLE", "orange", [ "h0" ] ]
-   ],
-    {
-      "type": "wokwi-stepper-motor",
-      "id": "stepper1",
-      "top": 400,
-      "left": 200,
-      "attrs": {}
-    }
+    [ "bargraph1:C2", "gnd1:GND", "black", [ "h0" ] ]
   ],
-  "connections": [
-    [ "esp:4", "stepper1:A1", "orange", [ "h0" ] ],
-    [ "esp:5", "stepper1:A2", "orange", [ "h0" ] ],
-    [ "esp:12", "stepper1:B1", "orange", [ "h0" ] ],
-    [ "esp:15", "stepper1:B2", "orange", [ "h0" ] ],
-    [ "esp:23", "stepper1:ENABLE", "orange", [ "h0" ] ],
+  "dependencies": {}
 }
