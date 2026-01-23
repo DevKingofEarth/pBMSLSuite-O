@@ -21,12 +21,15 @@
 #define SR_CLOCK_PIN   13  // Shift register clock (SR1.SHCP)
 #define SR_LATCH_PIN   2   // Shift register latch (SR1.STCP) - now free
 
-// Stepper Motor for Load Testing (Biaxial Stepper)
-#define STEPPER1_PIN   4   // Stepper motor coil A1
-#define STEPPER2_PIN   5   // Stepper motor coil A2
-#define STEPPER3_PIN   12  // Stepper motor coil B1
-#define STEPPER4_PIN   15  // Stepper motor coil B2
-#define STEPPER_ENABLE 23  // Stepper motor enable pin
+// Stepper Motor for Load Testing (Biaxial Stepper) - ACTUAL WOKWI CONNECTIONS
+#define STEPPER_A1_PLUS   2   // A1+  (GPIO 2)
+#define STEPPER_A1_MINUS  15  // A1-  (GPIO 15)
+#define STEPPER_A2_PLUS   5   // A2+  (GPIO 5)
+#define STEPPER_A2_MINUS  4   // A2-  (GPIO 4)
+#define STEPPER_B1_PLUS   0   // B1+  (GPIO 0)
+#define STEPPER_B1_MINUS  23  // B1-  (GPIO 23)
+#define STEPPER_B2_PLUS   27  // B2+  (GPIO 27)
+#define STEPPER_B2_MINUS  32  // B2-  (GPIO 32)
 
 // NTC Thermistor Configuration (Steinhart-Hart)
 #define NTC_NOMINAL_RESISTANCE 10000.0f
@@ -633,13 +636,15 @@ private:
 
       // ============ Stepper Motor Control ============
       void initStepperMotor() {
-          pinMode(STEPPER1_PIN, OUTPUT);
-          pinMode(STEPPER2_PIN, OUTPUT);
-          pinMode(STEPPER3_PIN, OUTPUT);
-          pinMode(STEPPER4_PIN, OUTPUT);
-          pinMode(STEPPER_ENABLE, OUTPUT);
+          pinMode(STEPPER_A1_PLUS, OUTPUT);
+          pinMode(STEPPER_A1_MINUS, OUTPUT);
+          pinMode(STEPPER_A2_PLUS, OUTPUT);
+          pinMode(STEPPER_A2_MINUS, OUTPUT);
+          pinMode(STEPPER_B1_PLUS, OUTPUT);
+          pinMode(STEPPER_B1_MINUS, OUTPUT);
+          pinMode(STEPPER_B2_PLUS, OUTPUT);
+          pinMode(STEPPER_B2_MINUS, OUTPUT);
 
-          digitalWrite(STEPPER_ENABLE, LOW);  // Enable stepper motor
           stopStepperMotor();  // Start with motor stopped
       }
 
@@ -648,10 +653,14 @@ private:
       }
 
       void stopStepperMotor() {
-          digitalWrite(STEPPER1_PIN, LOW);
-          digitalWrite(STEPPER2_PIN, LOW);
-          digitalWrite(STEPPER3_PIN, LOW);
-          digitalWrite(STEPPER4_PIN, LOW);
+          digitalWrite(STEPPER_A1_PLUS, LOW);
+          digitalWrite(STEPPER_A1_MINUS, LOW);
+          digitalWrite(STEPPER_A2_PLUS, LOW);
+          digitalWrite(STEPPER_A2_MINUS, LOW);
+          digitalWrite(STEPPER_B1_PLUS, LOW);
+          digitalWrite(STEPPER_B1_MINUS, LOW);
+          digitalWrite(STEPPER_B2_PLUS, LOW);
+          digitalWrite(STEPPER_B2_MINUS, LOW);
           stepperSpeed = 0;
       }
 
@@ -665,11 +674,12 @@ private:
           int stepDelay = map(stepperSpeed, 1, 100, 50, 2);  // Faster at higher speed
 
           if (currentTime - lastStepperStep >= stepDelay) {
-              // Set coil states for current step
-              digitalWrite(STEPPER1_PIN, stepperSteps[stepperStepIndex][0]);
-              digitalWrite(STEPPER2_PIN, stepperSteps[stepperStepIndex][1]);
-              digitalWrite(STEPPER3_PIN, stepperSteps[stepperStepIndex][2]);
-              digitalWrite(STEPPER4_PIN, stepperSteps[stepperStepIndex][3]);
+               // Set coil states for current step using actual biaxial motor pins
+               // Map step pattern [A1+, A1-, A2+, A2-] for biaxial stepper
+               digitalWrite(STEPPER_A1_PLUS,  stepperSteps[stepperStepIndex][0]);
+               digitalWrite(STEPPER_A1_MINUS, stepperSteps[stepperStepIndex][1]);
+               digitalWrite(STEPPER_A2_PLUS,  stepperSteps[stepperStepIndex][2]);
+               digitalWrite(STEPPER_A2_MINUS, stepperSteps[stepperStepIndex][3]);
 
               // Move to next step
               stepperStepIndex = (stepperStepIndex + stepperDirection + 8) % 8;
