@@ -1,4 +1,4 @@
-# 🔬 Wokwi Test Execution Plan - LED Bar Graph Fix Verification
+# 🚀 Wokwi Test Execution Plan - Stepper Motor Load Testing
 
 **Date**: Jan 23, 2026  
 **Status**: READY FOR TESTING  
@@ -8,179 +8,222 @@
 
 ## 📋 Test Objectives
 
-After applying fixes:
-1. ✅ **LED Bar Graph**: All 10 segments light sequentially (0→10)
-2. ✅ **Status LED**: GPIO 22 indicates system state (steady=OK, flash=FAULT)
-3. ✅ **Serial Output**: Clean, readable status messages
-4. ✅ **Fault Injection**: OV/UV/OT/UT properly detected and logged
+Verify the stepper motor load testing implementation:
+1. ✅ **Stepper Motor Control**: PWM speed control (0-100% load)
+2. ✅ **Real Discharge**: SoC decreases proportionally to load
+3. ✅ **LED Bar Graph**: Shows minimum cell SoC (not average)
+4. ✅ **Status LED**: GPIO 22 indicates system state
+5. ✅ **Serial Output**: Shows motor status and discharge rates
+6. ✅ **Fault Injection**: Works under load conditions
 
 ---
 
 ## 🔧 Setup Instructions
 
 ### Pre-Test Checklist
-- [ ] Firmware: `pBMSLSuite-O.ino` uploaded with LED bar loop fix (LSB-first: `for (int i = 0; i < 16; i++)`)
-- [ ] Circuit: `diagram.json` loaded (no pot5, no led1, shift registers on GPIO 13/2/14)
+- [ ] Firmware: `pBMSLSuite-O.ino` uploaded (stepper motor code included)
+- [ ] Circuit: `diagram.json` loaded (clean version)
+- [ ] Stepper Motor: Manually added in Wokwi browser (see MANUAL_STEPPER_INTEGRATION.md)
+- [ ] Connections: 5 wires from ESP32 GPIO 4,5,12,15,23 to stepper motor
 - [ ] Serial Console: Open and monitoring at 115200 baud
-- [ ] Simulation Time: Set to 1x or 2x speed for faster testing
+- [ ] Simulation Time: Set to 1x speed for accurate timing
 
 ---
 
 ## 🧪 Test Cases
 
-### Test 1: LED Bar Graph Sequential Lighting ⭐ CRITICAL
+### Test 1: Stepper Motor Load Control ⭐ CRITICAL
 
-**Objective**: Verify all 10 LED segments light in order as SoC increases
+**Objective**: Verify stepper motor responds to load commands and affects discharge
 
 **Procedure**:
-1. **Start simulation** with cell voltage at minimum (turn pot all the way down)
-   - Expected: 0 LEDs lit (SoC ≈ 0%)
-   - Verify: All segments dark
+1. **Start simulation** with cells at 4.2V (100% SoC)
+   - Type `LOAD 0` (should show motor stopped)
+   - Verify: No discharge, motor status shows "Stopped"
 
-2. **Adjust potentiometer 1 (GPIO 34)** slowly from 0V → 4.2V
-   - **Watch the LED bar graph**
-   - Expected pattern:
-     ```
-     SoC: 0%  → LEDs: 0 (────────────)
-     SoC: 10% → LEDs: 1 (●───────────)
-     SoC: 20% → LEDs: 2 (●●──────────)
-     SoC: 30% → LEDs: 3 (●●●─────────)
-     ...
-     SoC: 100% → LEDs: 10 (●●●●●●●●●●)
-     ```
+2. **Test low load**: Type `LOAD 25`
+   - **Expected**: Motor spins slowly, discharge begins
+   - Serial output: `Stepper Motor: Running (25% load)`
+   - SoC decreases: ~0.25% per minute
 
-3. **Record observations**:
-   - [ ] Do all 10 LEDs light?
-   - [ ] Do they light in sequence (A1, A2, A3, ... A10)?
-   - [ ] No random segments glowing?
-   - [ ] No missing segments?
+3. **Test high load**: Type `LOAD 100`
+   - **Expected**: Motor spins fast, rapid discharge
+   - Serial output: `Stepper Motor: Running (100% load)`
+   - SoC decreases: ~1.0% per minute
+
+4. **Stop load**: Type `STOP LOAD`
+   - **Expected**: Motor stops immediately
+   - Serial output: `Stepper Motor: Stopped`
+   - Discharge halts
 
 **Success Criteria**:
-- All 10 segments light sequentially
-- No gaps or out-of-order LEDs
-- Each segment is bright and clear
+- Motor speed changes with load commands
+- SoC decreases proportionally to load
+- STOP LOAD halts everything
+- Serial output shows correct motor status
 
-**Failure Analysis** (if only A7-A10 light):
-- LSB-first loop didn't apply correctly
-- Check line 573: should be `for (int i = 0; i < 16; i++)`
-
----
-
-### Test 2: Status LED Behavior
-
-**Objective**: Verify GPIO 22 LED indicates system state correctly
-
-**Normal State (IDLE)**:
-1. Maintain all cell voltages between 2.5V and 4.2V (safe range)
-2. Temperature at 25°C (NTC default)
-3. Expected: **Status LED steady ON** (green or appropriate color)
-
-**Fault State (After Injection)**:
-1. Status LED should **flash** when system detects fault
-2. See Test 5 for injection details
+**Failure Analysis**:
+- No motor spin: Check GPIO connections (4,5,12,15,23)
+- No discharge: Check SoC calculation code
+- Wrong speed: Check PWM timing in stepper control
 
 ---
 
-### Test 3: Serial Output Clarity
+### Test 2: LED Bar Graph - Minimum Cell SoC Display
 
-**Objective**: Verify serial console output is clean and readable
+**Objective**: Verify LED bar shows minimum cell SoC (critical for BMS safety)
+
+**Procedure**:
+1. **Set balanced cells**: All 4 cells at 4.0V
+   - Expected: LED bar shows ~8-9 LEDs (80-90% SoC)
+   - Serial: `Min Cell SoC: ~90%`
+
+2. **Create imbalance**: Set Cell 1 to 3.0V, others at 4.0V
+   - Expected: LED bar drops to show minimum cell (Cell 1)
+   - Serial: `Min Cell SoC: ~10%` (reflects weakest cell)
+   - This demonstrates why minimum cell matters for safety
+
+3. **Test with load**: Type `LOAD 50`, then create imbalance
+   - Expected: LED bar shows discharge of weakest cell
+   - Serial: Shows real discharge impact on minimum cell
+
+**Success Criteria**:
+- LED bar reflects minimum cell voltage, not average
+- Imbalanced cells show lower SoC on bar
+- Load affects minimum cell discharge rate
+
+**Why This Matters**: BMS safety depends on weakest cell, not average
+
+---
+
+### Test 3: Serial Output with Motor Status
+
+**Objective**: Verify serial output includes stepper motor status and load information
 
 **Expected Output** (every 1 second):
 ```
+🔋 BATTERY STATUS:
+   ⚙️  Stepper Motor: Running (75% load)
+   Min Cell SoC: 85.2% | SoH: 98.5% | Load: 75%
+
 ========== BMS Status ==========
-STATE: IDLE (Steady, 0 LEDs)
-VOLTAGE:     2.7V  3.0V  3.2V  3.0V
+STATE: IDLE (Steady, 8 LEDs)
+VOLTAGE:     4.0V  4.0V  4.0V  3.8V
 TEMP:        25°C
-SoC:         30%
+Min Cell SoC: 82.3%
 Fault Status: NONE
 =================================
-
-(repeat every 1 second)
 ```
 
 **Check for**:
-- [ ] No garbage characters
-- [ ] All values present (4 voltages, temp, SoC, fault status)
-- [ ] Consistent format
-- [ ] No repeated errors
+- [ ] Stepper motor status line present
+- [ ] Load percentage shown (0-100%)
+- [ ] "Min Cell SoC" instead of just "SoC"
+- [ ] Load affects discharge rate in output
+- [ ] No errors when motor starts/stops
 
 ---
 
-### Test 4: Cell Voltage Reading
+### Test 4: Load-Aware State Transitions
 
-**Objective**: Verify potentiometer values map to correct cell voltages
+**Objective**: Verify BMS state machine works correctly under load
 
 **Procedure**:
-1. Turn Pot1 (GPIO 34) to 0% → Should read ~1.0V (no cell)
-2. Turn Pot1 to 50% → Should read ~2.65V (typical discharged cell)
-3. Turn Pot1 to 100% → Should read ~4.2V (charged cell)
+1. **Create balancing scenario**: Set cells to 4.0V, 3.8V, 3.6V, 3.4V
+   - Expected: System enters BALANCING state
+   - Serial: `STATE: BALANCING`
+   - Balance pins activate (~5 second cycles)
 
-**Check**: Serial output shows matching voltages
+2. **Add load during balancing**: Type `LOAD 50`
+   - Expected: Balancing continues under load
+   - Serial: Shows both balancing and motor running
+   - Discharge affects balancing effectiveness
+
+3. **Stop load**: Type `STOP LOAD`
+   - Expected: Motor stops, balancing continues until cells equalize
+
+**Success Criteria**:
+- BALANCING state activates on voltage imbalance
+- Motor can run during balancing
+- Load affects discharge but doesn't crash system
 
 ---
 
-### Test 5: Fault Injection & Detection
+### Test 5: Fault Injection Under Load
 
-**Objective**: Verify fault detection works correctly
+**Objective**: Verify fault detection works with stepper motor running
 
-**Procedure**: Use serial console to inject faults
+**Procedure**: Test faults while motor is consuming power
 
-#### 5a. Over-Voltage (OV)
+#### 5a. Over-Voltage Under Load
 ```
+Serial Input: LOAD 50
 Serial Input: INJECT OV
-Expected Serial Output: "FAULT DETECTED: Over-voltage on Cell X"
-Expected Status LED: Flash pattern (rapid blink)
-Expected LED Bar: All 10 LEDs light (red alert)
+Expected: Fault detection + motor continues running
+Expected Serial: "FAULT DETECTED: Over-voltage" + motor status
+Expected LED: Status LED flashes, bar shows alert
 ```
 
-#### 5b. Under-Voltage (UV)
+#### 5b. Under-Voltage Under Load
 ```
+Serial Input: LOAD 100
 Serial Input: INJECT UV
-Expected Serial Output: "FAULT DETECTED: Under-voltage on Cell X"
-Expected Status LED: Flash pattern
-Expected LED Bar: All 10 LEDs light
+Expected: Fault + rapid discharge from motor
+Expected Serial: Shows fault + high load consumption
 ```
 
-#### 5c. Over-Temperature (OT)
+#### 5c. Over-Temperature Under Load
 ```
+Serial Input: LOAD 75
 Serial Input: INJECT OT
-Expected Serial Output: "FAULT DETECTED: Over-temperature"
-Expected Status LED: Flash pattern
-Expected LED Bar: All 10 LEDs light
+Expected: Thermal fault while motor generates heat
+Expected Serial: Temperature fault + load status
 ```
 
-#### 5d. Under-Temperature (UT)
-```
-Serial Input: INJECT UT
-Expected Serial Output: "FAULT DETECTED: Under-temperature"
-Expected Status LED: Flash pattern
-Expected LED Bar: All 10 LEDs light
-```
-
-**Recovery**:
+**Recovery Under Load**:
 ```
 Serial Input: CLEAR FAULTS
-Expected: System returns to IDLE state
-Expected LED Bar: Back to SoC-based display (0-10 LEDs)
-Expected Status LED: Steady on
+Expected: Fault clears but motor keeps running
+Serial Input: STOP LOAD
+Expected: Motor stops, system fully recovers
 ```
+
+**Success Criteria**:
+- Faults detected with motor running
+- Motor doesn't crash system during faults
+- Recovery commands work with motor active
 
 ---
 
-### Test 6: State Transitions
+### Test 6: Comprehensive Load Testing Scenarios
 
-**Objective**: Verify state machine transitions work correctly
+**Objective**: Test real-world BMS load testing capabilities
 
-**IDLE → BALANCING**:
-1. Set Cell1 = 3.8V, Cell2 = 3.2V, Cell3 = 3.0V, Cell4 = 2.8V (voltage imbalance)
-2. Wait 5+ seconds for balancing logic to detect
-3. Expected Serial Output: `STATE: BALANCING`
-4. Expected: Balance control pins (GPIO 16-19) should activate
+#### Scenario A: Endurance Test
+1. Set cells to 80% SoC (3.5V each)
+2. Type `LOAD 30` (moderate load)
+3. Monitor discharge over 5+ minutes
+4. Expected: SoC drops steadily, LED bar shows progress
+5. Stop at 20% SoC: `STOP LOAD`
 
-**BALANCING → IDLE** (after voltage equalizes):
-1. Manually adjust pots to make all cells ≈ 3.5V
-2. Wait for automatic transition
-3. Expected: Back to `STATE: IDLE`
+#### Scenario B: Load Stress Test
+1. Start with full charge (4.2V)
+2. Type `LOAD 100` (maximum load)
+3. Expected: Rapid discharge (1% per minute)
+4. LED bar shows fast decreasing levels
+5. Stop before hitting UV faults
+
+#### Scenario C: Variable Load Simulation
+1. Start `LOAD 25` for 2 minutes
+2. Change to `LOAD 75` for 2 minutes
+3. Change to `LOAD 50` for 2 minutes
+4. Expected: Discharge rate changes with load commands
+5. LED bar reflects changing discharge rates
+
+**Success Criteria**:
+- Load changes affect discharge rates immediately
+- System handles variable loads without crashing
+- Long-term testing shows realistic battery behavior
 
 ---
 
@@ -253,50 +296,59 @@ Notes:
 
 | Test | Requirement | Status |
 |------|-------------|--------|
-| LED Bar Graph | All 10 segments light sequentially 0→10 | ⬜ |
-| Status LED | Steady in IDLE, flashes on FAULT | ⬜ |
-| Serial Output | Clean, readable, no errors | ⬜ |
-| Fault Detection | OV/UV/OT/UT all work | ⬜ |
-| LED Alert | All 10 LEDs light on fault | ⬜ |
-| Recovery | System returns to normal after clearing fault | ⬜ |
+| Stepper Motor | Responds to LOAD commands, speed changes | ⬜ |
+| Load Discharge | SoC decreases proportionally to load | ⬜ |
+| Minimum Cell SoC | LED bar shows weakest cell, not average | ⬜ |
+| Serial Output | Shows motor status and discharge rates | ⬜ |
+| Load + Faults | Faults detected with motor running | ⬜ |
+| Load Scenarios | Variable loads work for endurance testing | ⬜ |
 
 ---
 
 ## 🐛 Troubleshooting
 
-### Issue: Only A7 LED lights (Previous bug)
-**Solution**: 
-- Verify firmware line 573: `for (int i = 0; i < 16; i++)`
-- Should NOT be: `for (int i = 15; i >= 0; i--)`
-- Re-upload firmware if needed
-
-### Issue: LEDs don't light at all
+### Issue: Stepper motor doesn't spin
 **Check**:
-- [ ] Shift registers connected to GPIO 13/2/14
-- [ ] 220Ω resistors present on LED bar anodes
-- [ ] LED bar cathodes grounded
-- [ ] Firmware compiling without errors
+- [ ] Stepper motor component added to Wokwi
+- [ ] All 5 wires connected: GPIO 4,5,12,15,23 to stepper pins
+- [ ] Wires are orange for easy identification
+- [ ] Serial shows "Stepper Motor: Running" when LOAD command sent
 
-### Issue: Serial output missing
+### Issue: Motor spins but no discharge
 **Check**:
-- [ ] Console open at 115200 baud
-- [ ] USB cable connected
-- [ ] Wokwi serial monitor active
+- [ ] Serial output shows "Min Cell SoC" decreasing
+- [ ] Load percentage affects discharge rate (higher load = faster discharge)
+- [ ] Wait several minutes - discharge is gradual
+- [ ] LED bar shows decreasing levels
 
-### Issue: Status LED doesn't flash on fault
+### Issue: Wrong discharge rate
 **Check**:
-- [ ] GPIO 22 configured as OUTPUT
-- [ ] LED2 (STATUS_LED) physically on GPIO 22 in diagram
-- [ ] Fault detection code reached (watch serial output)
+- [ ] LOAD 100 should discharge 1% per minute
+- [ ] LOAD 50 should discharge 0.5% per minute
+- [ ] LOAD 25 should discharge 0.25% per minute
+- [ ] LOAD 0 should stop all discharge
+
+### Issue: Serial shows errors
+**Check**:
+- [ ] Baud rate is 115200
+- [ ] Commands are uppercase: `LOAD 50`, not `load 50`
+- [ ] Stepper motor is properly connected in Wokwi
+
+### Issue: System crashes with load
+**Check**:
+- [ ] All GPIO pins (4,5,12,15,23) are available (not used elsewhere)
+- [ ] Firmware uploaded correctly
+- [ ] No compilation errors in Wokwi
 
 ---
 
-## 📝 Notes for Future Testing
+## 📝 Notes for Real Hardware Deployment
 
-1. **Real Hardware Testing**: Once Wokwi tests pass, deploy to actual ESP32 + breadboard
-2. **Load Simulation**: Consider adding stepper motor or PWM load for realistic discharge
-3. **Balancing Current**: Implement actual sense resistor for balance current measurement
-4. **INA219 Integration**: Add power monitoring (if applicable)
+1. **Stepper Motor Driver**: Real hardware needs ULN2003 or A4988 driver
+2. **Power Supply**: Stepper motor needs separate 5-12V supply
+3. **Current Sensing**: Add INA219 for actual current measurement
+4. **Heat Dissipation**: High loads generate real heat - add cooling
+5. **Load Profiles**: Create standard discharge test profiles
 
 ---
 
