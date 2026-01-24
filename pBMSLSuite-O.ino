@@ -1,10 +1,6 @@
 // pBMSLSuite-O - Portable BMS Lab Suite
-// Energy-Efficient, Portable, Predictive BMS for National Security
-// Based on Wokwi Circuit Design
-
-// I2C Libraries (for INA219 current sensor)
-// #include <Wire.h>
-// #include <Adafruit_INA219.h>  // Install: Sketch → Include Library → Manage Libraries → Search "Adafruit INA219"
+// Core BMS functionality: cell monitoring, SoC, fault protection
+// Educational prototype for BMS firmware concepts
 
 // Pin Definitions
 #define CELL1_PIN    34    // Potentiometer 1
@@ -16,22 +12,9 @@
 #define BALANCE2_PIN 17    // Cell 2 balance resistor
 #define BALANCE3_PIN 18    // Cell 3 balance resistor
 #define BALANCE4_PIN 19    // Cell 4 balance resistor
-#define STATUS_LED_PIN 22  // BMS state indication (changed from GPIO 2 to avoid conflict)
-#define SR_DATA_PIN    14  // Shift register data (SR1.DS)
-#define SR_CLOCK_PIN   13  // Shift register clock (SR1.SHCP)
-#define SR_LATCH_PIN   2   // Shift register latch (SR1.STCP) - now free
+#define STATUS_LED_PIN 22  // BMS state indication
 
-// Stepper Motor for Load Testing (Biaxial Stepper) - ACTUAL WOKWI CONNECTIONS
-#define STEPPER_A1_PLUS   2   // A1+  (GPIO 2)
-#define STEPPER_A1_MINUS  15  // A1-  (GPIO 15)
-#define STEPPER_A2_PLUS   5   // A2+  (GPIO 5)
-#define STEPPER_A2_MINUS  4   // A2-  (GPIO 4)
-#define STEPPER_B1_PLUS   0   // B1+  (GPIO 0)
-#define STEPPER_B1_MINUS  23  // B1-  (GPIO 23)
-#define STEPPER_B2_PLUS   27  // B2+  (GPIO 27)
-#define STEPPER_B2_MINUS  32  // B2-  (GPIO 32)
-
-// NTC Thermistor Configuration (Steinhart-Hart)
+// NTC Thermistor Configuration
 #define NTC_NOMINAL_RESISTANCE 10000.0f
 #define NTC_BETA_COEFFICIENT 3950.0f
 #define NTC_NOMINAL_TEMP 25.0f
@@ -45,31 +28,6 @@
 #define OT_THRESHOLD 60.0f    // Over-temperature
 #define UT_THRESHOLD 0.0f     // Under-temperature
 #define BALANCE_THRESHOLD 4.1f // Balance trigger
-
-// Voltage Divider Configuration
-// For real hardware: Use voltage dividers to measure 0-5V on 0-3.3V ADC
-// Set USE_VOLTAGE_DIVIDER = 1 for hardware, 0 for Wokwi simulation
-#define USE_VOLTAGE_DIVIDER 0
-
-// Voltage Divider Parameters (if enabled)
-// Hardware: R1=10kΩ (top), R2=15kΩ (bottom)
-// V_measured = V_in * (R2 / (R1 + R2)) = V_in * (15k / 25k) = V_in * 0.6
-// Scaling factor: 1.0 / 0.6 = 1.667
-#define VOLTAGE_DIVIDER_RATIO 0.6f
-#define VOLTAGE_DIVIDER_SCALE (1.0f / VOLTAGE_DIVIDER_RATIO)  // 1.667
-
-// Current Sensor (INA219) Configuration
-// Set USE_INA219 = 1 to enable current sensing via I2C
-// INA219 provides: Bus voltage, Shunt current, Power
-#define USE_INA219 0
-
-// INA219 I2C Configuration
-#define INA219_ADDRESS 0x40  // Default I2C address (A0=GND, A1=GND)
-#define INA219_MAX_CURRENT_AMPS 3.2f  // 3.2A max (typical for battery)
-#define INA219_SHUNT_OHMS 0.1f  // 0.1Ω shunt resistor
-
-// Global INA219 Instance (will be initialized if enabled)
-// Adafruit_INA219 ina219(INA219_ADDRESS);
 
 // Moving Average Filter
 struct MovingAverageFilter {
@@ -85,17 +43,10 @@ struct MovingAverageFilter {
         if (count < 5) count++;
         return sum / count;
     }
-    
-    void reset() {
-        for (int i = 0; i < 5; i++) buffer[i] = 0.0f;
-        sum = 0.0f;
-        index = 0;
-        count = 0;
-    }
 };
 
 // BMS State Machine
-enum BMSState { IDLE, CHARGING, DISCHARGING, BALANCING, FAULT };
+enum BMSState { IDLE, BALANCING, FAULT };
 
 // Fault Types
 enum FaultType { FAULT_NONE, FAULT_OV, FAULT_UV, FAULT_OT, FAULT_UT };
@@ -105,288 +56,79 @@ MovingAverageFilter cellFilters[4];
 MovingAverageFilter tempFilter;
 float cellVoltages[4] = {0};
 float temperature = 25.0f;
-float loadCurrent = 0.0f;
-float busVoltage = 0.0f;      // From INA219 (pack voltage)
-float shuntCurrent = 0.0f;    // From INA219 (charge/discharge current)
-float busPower = 0.0f;        // From INA219 (power consumption)
 float estimatedSoC = 100.0f;
 float estimatedSoH = 100.0f;
 
-// Stepper Motor Control for Load Testing
-int stepperSpeed = 0;         // 0-100% speed for load control
-int stepperDirection = 1;     // 1 = forward, -1 = reverse
-unsigned long lastStepperStep = 0;
-int stepperStepIndex = 0;
-int stepDelay = 50;           // Current step delay (ms)
-
-// Motor Load Simulation Variables (Realistic Engineering Approximation)
-int estimated_motor_current_ma = 0;     // 80-450mA based on load
-float estimated_motor_power_w = 0.0f;   // Power consumption
-float soc_decay_rate = 0.0f;            // SoC drain rate (% per minute)
-float motor_heat_generation = 0.0f;     // Temperature rise (°C)
-float motor_step_frequency_hz = 0.0f;   // Step frequency (Hz)
-unsigned long total_motor_steps = 0;     // Cumulative steps executed
-const int stepperSteps[8][4] = {
-    {1, 0, 0, 0},  // Step 1
-    {1, 1, 0, 0},  // Step 2
-    {0, 1, 0, 0},  // Step 3
-    {0, 1, 1, 0},  // Step 4
-    {0, 0, 1, 0},  // Step 5
-    {0, 0, 1, 1},  // Step 6
-    {0, 0, 0, 1},  // Step 7
-    {1, 0, 0, 1}   // Step 8
-};
 BMSState currentState = IDLE;
 FaultType currentFault = FAULT_NONE;
 unsigned long lastCSVTime = 0;
-unsigned long lastSoCUpdate = 0;
-
-// Fault Injection Testing
-bool faultInjectionEnabled = false;
-FaultType injectedFault = FAULT_NONE;
-float injectedValue = 0.0f;
-unsigned long injectionStartTime = 0;
-unsigned long injectionDuration = 0;
-int faultSampleCount = 0;
-const int FAULT_DEBOUNCE_SAMPLES = 3;
-
-// INA219 Status
-bool ina219Initialized = false;
-bool ina219Error = false;
-
-// Simple spike filter
-float filterSpike(float current, float last) {
-    if (last == 0) return current;
-    return abs(current - last) < 0.5f ? current : last;
-}
 
 class PBMSController {
 public:
     void init() {
-         // Initialize ADC pins
-         pinMode(CELL1_PIN, INPUT);
-         pinMode(CELL2_PIN, INPUT);
-         pinMode(CELL3_PIN, INPUT);
-         pinMode(CELL4_PIN, INPUT);
-         pinMode(TEMP_PIN, INPUT);
-         
-         // Initialize balancing outputs
-         pinMode(BALANCE1_PIN, OUTPUT);
-         pinMode(BALANCE2_PIN, OUTPUT);
-         pinMode(BALANCE3_PIN, OUTPUT);
-         pinMode(BALANCE4_PIN, OUTPUT);
-         
-         // Initialize status LED
-         pinMode(STATUS_LED_PIN, OUTPUT);
-
-          // Initialize shift register pins for LED bar graph
-          pinMode(SR_DATA_PIN, OUTPUT);
-          pinMode(SR_CLOCK_PIN, OUTPUT);
-          pinMode(SR_LATCH_PIN, OUTPUT);
-
-          // Initialize stepper motor for load testing
-          initStepperMotor();
-         
-         Serial.begin(115200);
-         Serial.println("pBMSLSuite-O v1.0 - Portable BMS Lab Suite");
-         Serial.println("==========================================");
-         
-         // Display voltage measurement configuration
-         if (USE_VOLTAGE_DIVIDER) {
-             Serial.println("⚙️  VOLTAGE MODE: Hardware Dividers (0-5V range)");
-             Serial.printf("    R1=10kΩ, R2=15kΩ, Ratio=%.2f, Scale=%.3f\n", 
-                          VOLTAGE_DIVIDER_RATIO, VOLTAGE_DIVIDER_SCALE);
-         } else {
-             Serial.println("⚙️  VOLTAGE MODE: Direct ADC (0-3.3V range - Wokwi Simulation)");
-         }
-         
-         // Initialize INA219 Current Sensor if enabled
-         if (USE_INA219) {
-             initializeINA219();
-         } else {
-             Serial.println("⚙️  CURRENT SENSOR: Disabled (load current from slider pot)");
-         }
-         
-         Serial.println();
-     }
-     
-     void initializeINA219() {
-         #if USE_INA219
-             // Uncomment these lines when Adafruit_INA219 library is installed:
-             // Wire.begin();
-             // if (ina219.begin()) {
-             //     ina219.setCalibration_32V_3A();  // 32V max, 3A max
-             //     ina219Initialized = true;
-             //     Serial.println("⚙️  CURRENT SENSOR: INA219 initialized via I2C");
-             //     Serial.printf("    Address: 0x%02X, Shunt: %.1fΩ\n", INA219_ADDRESS, INA219_SHUNT_OHMS);
-             // } else {
-             //     ina219Error = true;
-             //     Serial.println("⚠️  CURRENT SENSOR: INA219 not found on I2C bus!");
-             // }
-             Serial.println("⚙️  CURRENT SENSOR: INA219 support compiled (library install required)");
-         #endif
-     }
-    
+        // Initialize ADC pins
+        pinMode(CELL1_PIN, INPUT);
+        pinMode(CELL2_PIN, INPUT);
+        pinMode(CELL3_PIN, INPUT);
+        pinMode(CELL4_PIN, INPUT);
+        pinMode(TEMP_PIN, INPUT);
+        
+        // Initialize balancing outputs
+        pinMode(BALANCE1_PIN, OUTPUT);
+        pinMode(BALANCE2_PIN, OUTPUT);
+        pinMode(BALANCE3_PIN, OUTPUT);
+        pinMode(BALANCE4_PIN, OUTPUT);
+        
+        // Initialize status LED
+        pinMode(STATUS_LED_PIN, OUTPUT);
+        
+        Serial.begin(115200);
+        Serial.println("pBMSLSuite-O v1.0 - Portable BMS Lab Suite");
+        Serial.println("==========================================");
+        Serial.println("Core BMS: 4-cell monitoring, SoC, fault protection");
+        Serial.println();
+    }
+      
     void run() {
-         // Read sensors
-         readSensors();
-         
-         // Handle fault injection for testing
-         handleFaultInjection();
-         
-         // Update SoC estimation
-         updateSoC();
-         
-         // State machine
-         updateStateMachine();
-         
-         // Fault detection
-         checkFaults();
-         
-          // Update stepper motor for load testing
-          updateStepperMotor();
+        // Read sensors
+        readSensors();
+        
+        // Update SoC estimation
+        updateSoC();
+        
+        // State machine
+        updateStateMachine();
+        
+        // Fault detection
+        checkFaults();
+        
+        // CSV logging (1Hz)
+        if (millis() - lastCSVTime > 1000) {
+            logCSV();
+            lastCSVTime = millis();
+        }
 
-          // CSV logging (1Hz)
-          if (millis() - lastCSVTime > 1000) {
-              logCSV();
-              lastCSVTime = millis();
-          }
-
-          delay(100);  // 10Hz loop
-     }
-     
-     // ============ Fault Injection Methods ============
-     void enableFaultInjection() {
-         faultInjectionEnabled = true;
-         Serial.println("\n✅ Fault Injection Mode ENABLED");
-         Serial.println("Commands: INJECT OV/UV/OT/UT, DISABLE INJECTION, CLEAR FAULT");
-     }
-     
-     void disableFaultInjection() {
-         faultInjectionEnabled = false;
-         injectedFault = FAULT_NONE;
-         Serial.println("\n✅ Fault Injection Mode DISABLED");
-     }
-     
-     void injectFault(FaultType faultType, float value, unsigned long durationMs) {
-         if (!faultInjectionEnabled) {
-             Serial.println("⚠️  Fault injection not enabled. Use: ENABLE INJECTION");
-             return;
-         }
-         
-         injectedFault = faultType;
-         injectedValue = value;
-         injectionStartTime = millis();
-         injectionDuration = durationMs;
-         faultSampleCount = 0;
-         
-         Serial.print("🔬 Fault Injected: ");
-         printFaultName(faultType);
-         Serial.printf(" (Value: %.2f, Duration: %lu ms)\n", value, durationMs);
-     }
-     
-     void handleFaultInjection() {
-         if (!faultInjectionEnabled || injectedFault == FAULT_NONE) return;
-         
-         // Check if injection duration expired
-         if (injectionDuration > 0) {
-             if (millis() - injectionStartTime > injectionDuration) {
-                 injectedFault = FAULT_NONE;
-                 faultSampleCount = 0;
-                 Serial.println("✅ Injected fault cleared (duration expired)");
-                 return;
-             }
-         }
-         
-         // Apply injected values
-         if (injectedFault == FAULT_OV || injectedFault == FAULT_UV) {
-             // Override cell voltage for testing
-             for (int i = 0; i < 4; i++) {
-                 cellVoltages[i] = injectedValue;
-             }
-         } else if (injectedFault == FAULT_OT || injectedFault == FAULT_UT) {
-             // Override temperature for testing
-             temperature = injectedValue;
-         }
-     }
-     
-     void clearInjectedFault() {
-         if (faultInjectionEnabled) {
-             injectedFault = FAULT_NONE;
-             faultSampleCount = 0;
-             Serial.println("✅ Injected fault manually cleared");
-         }
-      }
-
-      // ============ Stepper Motor Control ============
-      void initStepperMotor() {
-          pinMode(STEPPER_A1_PLUS, OUTPUT);
-          pinMode(STEPPER_A1_MINUS, OUTPUT);
-          pinMode(STEPPER_A2_PLUS, OUTPUT);
-          pinMode(STEPPER_A2_MINUS, OUTPUT);
-          pinMode(STEPPER_B1_PLUS, OUTPUT);
-          pinMode(STEPPER_B1_MINUS, OUTPUT);
-          pinMode(STEPPER_B2_PLUS, OUTPUT);
-          pinMode(STEPPER_B2_MINUS, OUTPUT);
-
-          stopStepperMotor();  // Start with motor stopped
-      }
-
-      void setStepperLoad(int load) {
-          stepperSpeed = constrain(load, 0, 100);  // 0-100% load
-      }
-
-      void stopStepperMotor() {
-          digitalWrite(STEPPER_A1_PLUS, LOW);
-          digitalWrite(STEPPER_A1_MINUS, LOW);
-          digitalWrite(STEPPER_A2_PLUS, LOW);
-          digitalWrite(STEPPER_A2_MINUS, LOW);
-          digitalWrite(STEPPER_B1_PLUS, LOW);
-          digitalWrite(STEPPER_B1_MINUS, LOW);
-          digitalWrite(STEPPER_B2_PLUS, LOW);
-          digitalWrite(STEPPER_B2_MINUS, LOW);
-          stepperSpeed = 0;
-      }
-
- private:
-     void readSensors() {
-          // Read cell voltages with filtering
-          float rawV1 = analogRead(CELL1_PIN) * (V_REF / ADC_MAX_VALUE);
-          float rawV2 = analogRead(CELL2_PIN) * (V_REF / ADC_MAX_VALUE);
-          float rawV3 = analogRead(CELL3_PIN) * (V_REF / ADC_MAX_VALUE);
-          float rawV4 = analogRead(CELL4_PIN) * (V_REF / ADC_MAX_VALUE);
+        delay(100);  // 10Hz loop
+    }
+      
+private:
+    void readSensors() {
+        // Read cell voltages with filtering
+        float rawV1 = analogRead(CELL1_PIN) * (V_REF / ADC_MAX_VALUE);
+        float rawV2 = analogRead(CELL2_PIN) * (V_REF / ADC_MAX_VALUE);
+        float rawV3 = analogRead(CELL3_PIN) * (V_REF / ADC_MAX_VALUE);
+        float rawV4 = analogRead(CELL4_PIN) * (V_REF / ADC_MAX_VALUE);
           
-          // Apply voltage divider correction if enabled (for real hardware)
-          if (USE_VOLTAGE_DIVIDER) {
-              rawV1 *= VOLTAGE_DIVIDER_SCALE;
-              rawV2 *= VOLTAGE_DIVIDER_SCALE;
-              rawV3 *= VOLTAGE_DIVIDER_SCALE;
-              rawV4 *= VOLTAGE_DIVIDER_SCALE;
-       }
-         
-         cellVoltages[0] = cellFilters[0].add(rawV1);
-         cellVoltages[1] = cellFilters[1].add(rawV2);
-         cellVoltages[2] = cellFilters[2].add(rawV3);
-         cellVoltages[3] = cellFilters[3].add(rawV4);
-         
-         // Read temperature using Steinhart-Hart
-         float tempVoltage = analogRead(TEMP_PIN) * (V_REF / ADC_MAX_VALUE);
-         temperature = calculateTemperatureNTC(tempVoltage);
-         
-         // Read current from INA219 if available
-         readCurrentSensor();
-     }
+        cellVoltages[0] = cellFilters[0].add(rawV1);
+        cellVoltages[1] = cellFilters[1].add(rawV2);
+        cellVoltages[2] = cellFilters[2].add(rawV3);
+        cellVoltages[3] = cellFilters[3].add(rawV4);
+        
+        // Read temperature using Steinhart-Hart
+        float tempVoltage = analogRead(TEMP_PIN) * (V_REF / ADC_MAX_VALUE);
+        temperature = calculateTemperatureNTC(tempVoltage);
+    }
      
-     void readCurrentSensor() {
-         if (USE_INA219 && ina219Initialized && !ina219Error) {
-             // Placeholder for actual INA219 reading
-             // Uncomment when library is available:
-             // busVoltage = ina219.getBusVoltage_V();
-             // shuntCurrent = ina219.getCurrent_mA() / 1000.0f;  // Convert mA to A
-             // busPower = ina219.getPower_mW() / 1000.0f;  // Convert mW to W
-         }
-     }
-    
     float calculateTemperatureNTC(float voltage) {
         if (voltage >= V_REF - 0.01f) return -273.15f;
         
@@ -403,28 +145,16 @@ public:
     void updateSoC() {
         float avgVoltage = (cellVoltages[0] + cellVoltages[1] + cellVoltages[2] + cellVoltages[3]) / 4.0f;
         
-        // Enhanced SoC estimation with load consideration
+        // SoC estimation based on average voltage
         if (avgVoltage >= 4.20f) estimatedSoC = 100.0f;
         else if (avgVoltage <= 3.00f) estimatedSoC = 0.0f;
         else {
             estimatedSoC = ((avgVoltage - 3.00f) / 1.20f) * 100.0f;
         }
-
-        // Apply realistic motor load discharge effect
-        if (soc_decay_rate > 0.0f) {
-            // Convert % per minute to % per second, then per 100ms loop
-            float discharge_per_second = soc_decay_rate / 60.0f;
-            estimatedSoC -= discharge_per_second * 0.1f; // 100ms loop
-            estimatedSoC = max(estimatedSoC, 0.0f);
-        }
-
-        // Apply motor-generated heat to temperature reading
-        temperature += motor_heat_generation;
-        motor_heat_generation *= 0.95f; // Gradual heat dissipation
         
         // Simple SoH estimation (degrades with extreme temps)
         if (temperature > 45.0f || temperature < 10.0f) {
-            estimatedSoH -= 0.01f;  // Degrade slowly
+            estimatedSoH -= 0.01f;
         }
         estimatedSoH = constrain(estimatedSoH, 0.0f, 100.0f);
     }
@@ -452,42 +182,35 @@ public:
                 }
                 break;
                 
-            case BALANCING:
-                // Check if balancing still needed
-                {
-                    bool needsBalancing = false;
-                    for (int i = 0; i < 4; i++) {
-                        if (cellVoltages[i] > BALANCE_THRESHOLD) needsBalancing = true;
-                    }
-                    if (!needsBalancing) currentState = IDLE;
-                    if (currentFault != FAULT_NONE) currentState = FAULT;
+            case BALANCING: {
+                bool needsBalancing = false;
+                for (int i = 0; i < 4; i++) {
+                    if (cellVoltages[i] > BALANCE_THRESHOLD) needsBalancing = true;
                 }
+                if (!needsBalancing) currentState = IDLE;
+                if (currentFault != FAULT_NONE) currentState = FAULT;
                 break;
+            }
                 
             case FAULT:
-                // Auto-recovery when fault clears
                 if (currentFault == FAULT_NONE) currentState = IDLE;
                 break;
         }
         
-         // Control balancing
-         digitalWrite(BALANCE1_PIN, (cellVoltages[0] > BALANCE_THRESHOLD && currentState == BALANCING) ? HIGH : LOW);
-         digitalWrite(BALANCE2_PIN, (cellVoltages[1] > BALANCE_THRESHOLD && currentState == BALANCING) ? HIGH : LOW);
-         digitalWrite(BALANCE3_PIN, (cellVoltages[2] > BALANCE_THRESHOLD && currentState == BALANCING) ? HIGH : LOW);
-         digitalWrite(BALANCE4_PIN, (cellVoltages[3] > BALANCE_THRESHOLD && currentState == BALANCING) ? HIGH : LOW);
-
-         // Control LED bar graph (10-segment) based on SoC
-         updateLEDbarGraph();
-
-         // Status LED
-         digitalWrite(STATUS_LED_PIN, currentState == FAULT ? (millis() % 500 < 250 ? HIGH : LOW) : HIGH);
+        // Control balancing
+        digitalWrite(BALANCE1_PIN, (cellVoltages[0] > BALANCE_THRESHOLD && currentState == BALANCING) ? HIGH : LOW);
+        digitalWrite(BALANCE2_PIN, (cellVoltages[1] > BALANCE_THRESHOLD && currentState == BALANCING) ? HIGH : LOW);
+        digitalWrite(BALANCE3_PIN, (cellVoltages[2] > BALANCE_THRESHOLD && currentState == BALANCING) ? HIGH : LOW);
+        digitalWrite(BALANCE4_PIN, (cellVoltages[3] > BALANCE_THRESHOLD && currentState == BALANCING) ? HIGH : LOW);
+        
+        // Status LED
+        digitalWrite(STATUS_LED_PIN, currentState == FAULT ? (millis() % 500 < 250 ? HIGH : LOW) : HIGH);
     }
     
     void checkFaults() {
         float maxCell = cellVoltages[0];
         for (int i = 1; i < 4; i++) maxCell = max(maxCell, cellVoltages[i]);
         
-        // Check for faults
         if (maxCell > OV_THRESHOLD) currentFault = FAULT_OV;
         else if (maxCell < UV_THRESHOLD) currentFault = FAULT_UV;
         else if (temperature > OT_THRESHOLD) currentFault = FAULT_OT;
@@ -496,287 +219,102 @@ public:
     }
     
     void logCSV() {
-        // Human-readable formatted output
         Serial.println();
-        Serial.println("═══════════════════════════════════════════════════════════");
-        Serial.println("                    pBMSLSuite-O STATUS                     ");
-        Serial.println("═══════════════════════════════════════════════════════════");
+        Serial.println("==================================================");
+        Serial.println("              pBMSLSuite-O STATUS                 ");
+        Serial.println("==================================================");
         
-        // Timestamp
-        Serial.print("⏱️  Time: ");
+        Serial.print("Time: ");
         Serial.print(millis() / 1000);
         Serial.println(" seconds");
         
-        // Cell Voltages
-        Serial.println("───────────────────────────────────────────────────────────");
-        Serial.println("🔋 CELL VOLTAGES:");
-        Serial.printf("   Cell 1: %.3fV %s\n", cellVoltages[0], getVoltageStatus(cellVoltages[0]));
-        Serial.printf("   Cell 2: %.3fV %s\n", cellVoltages[1], getVoltageStatus(cellVoltages[1]));
-        Serial.printf("   Cell 3: %.3fV %s\n", cellVoltages[2], getVoltageStatus(cellVoltages[2]));
-        Serial.printf("   Cell 4: %.3fV %s\n", cellVoltages[3], getVoltageStatus(cellVoltages[3]));
+        Serial.println("--------------------------------------------------");
+        Serial.println("CELL VOLTAGES:");
+        Serial.printf("  Cell 1: %.3fV %s\n", cellVoltages[0], getVoltageStatus(cellVoltages[0]));
+        Serial.printf("  Cell 2: %.3fV %s\n", cellVoltages[1], getVoltageStatus(cellVoltages[1]));
+        Serial.printf("  Cell 3: %.3fV %s\n", cellVoltages[2], getVoltageStatus(cellVoltages[2]));
+        Serial.printf("  Cell 4: %.3fV %s\n", cellVoltages[3], getVoltageStatus(cellVoltages[3]));
         
-         float avgVoltage = (cellVoltages[0] + cellVoltages[1] + cellVoltages[2] + cellVoltages[3]) / 4.0f;
-         Serial.printf("   Average: %.3fV | Pack: %.2fV\n", avgVoltage, avgVoltage * 4);
-         
-         // Current Information (if available)
-         if (USE_INA219 && ina219Initialized && !ina219Error) {
-             Serial.println("───────────────────────────────────────────────────────────");
-             Serial.println("⚡ CURRENT INFORMATION:");
-             Serial.printf("   Bus Voltage: %.2fV | Current: %.3fA | Power: %.2fW\n", 
-                          busVoltage, shuntCurrent, busPower);
-         }
+        float avgVoltage = (cellVoltages[0] + cellVoltages[1] + cellVoltages[2] + cellVoltages[3]) / 4.0f;
+        Serial.printf("  Average: %.3fV | Pack: %.2fV\n", avgVoltage, avgVoltage * 4);
         
-         // Temperature
-         Serial.println("───────────────────────────────────────────────────────────");
-         Serial.print("🌡️  Temperature: ");
-         Serial.print(temperature, 1);
-         Serial.print("°C ");
-         Serial.println(getTempStatus());
-         
-         // Battery Status
-         Serial.println("───────────────────────────────────────────────────────────");
-         Serial.println("🔋 BATTERY STATUS:");
-
-         // Enhanced Motor Telemetry
-         if (stepperSpeed > 0) {
-             Serial.printf("   ⚙️  MOTOR LOAD: %d%% | Current: %dmA | Power: %.2fW\n",
-                          stepperSpeed, estimated_motor_current_ma, estimated_motor_power_w);
-             Serial.printf("   ⚙️  Frequency: %.1fHz | Steps: %lu | Runtime: %lus\n",
-                          motor_step_frequency_hz, total_motor_steps, millis() / 1000);
-         } else {
-             Serial.println("   ⚙️  Motor: Stopped | No load");
-         }
-
-         Serial.printf("   Min Cell SoC: %.1f%% | SoH: %.1f%% | SoC Drain: %.2f%%/min\n",
-                      estimatedSoC, estimatedSoH, soc_decay_rate);
+        Serial.println("--------------------------------------------------");
+        Serial.print("Temperature: ");
+        Serial.print(temperature, 1);
+        Serial.print("C ");
+        Serial.println(getTempStatus());
         
-        // State Machine
-        Serial.println("───────────────────────────────────────────────────────────");
-        Serial.print("⚙️  STATE: ");
-        Serial.print(getStateIcon());
-        printStateName();
-        Serial.println();
+        Serial.println("--------------------------------------------------");
+        Serial.println("BATTERY STATUS:");
+        Serial.printf("  SoC: %.1f%% | SoH: %.1f%%\n", estimatedSoC, estimatedSoH);
         
-        // Balancing Status
-        Serial.print("   Balancing: ");
+        Serial.println("--------------------------------------------------");
+        Serial.print("STATE: ");
+        Serial.println(getStateName());
+        
+        Serial.print("Balancing: ");
         bool balancing = digitalRead(BALANCE1_PIN) || digitalRead(BALANCE2_PIN) || 
                         digitalRead(BALANCE3_PIN) || digitalRead(BALANCE4_PIN);
-        Serial.println(balancing ? "🔄 ACTIVE" : "⏸️  IDLE");
+        Serial.println(balancing ? "ACTIVE" : "IDLE");
         
-        // Fault Status
-        Serial.println("───────────────────────────────────────────────────────────");
-        Serial.print("⚠️  FAULT: ");
+        Serial.println("--------------------------------------------------");
+        Serial.print("FAULT: ");
         if (currentFault == FAULT_NONE) {
-            Serial.println("✅ NONE");
+            Serial.println("NONE");
         } else {
-            Serial.print("❌ ");
             printFaultName();
             Serial.println();
         }
         
-        // Thresholds
-        Serial.println("───────────────────────────────────────────────────────────");
-        Serial.println("📊 THRESHOLDS:");
-        Serial.printf("   OV: %.2fV | UV: %.2fV | OT: %.0f°C | UT: %.0f°C\n", 
+        Serial.println("--------------------------------------------------");
+        Serial.println("THRESHOLDS:");
+        Serial.printf("  OV: %.2fV | UV: %.2fV | OT: %.0fC | UT: %.0fC\n", 
                      OV_THRESHOLD, UV_THRESHOLD, OT_THRESHOLD, UT_THRESHOLD);
         
-        Serial.println("═══════════════════════════════════════════════════════════");
+        Serial.println("==================================================");
     }
     
     const char* getVoltageStatus(float voltage) {
-        if (voltage > OV_THRESHOLD) return "⚠️ OV";
-        if (voltage < UV_THRESHOLD) return "⚠️ UV";
-        if (voltage > BALANCE_THRESHOLD) return "🔋 CHARGED";
-        if (voltage < 3.0f) return "🔋 LOW";
-        return "✅ OK";
+        if (voltage > OV_THRESHOLD) return "[OV]";
+        if (voltage < UV_THRESHOLD) return "[UV]";
+        if (voltage > BALANCE_THRESHOLD) return "[CHARGED]";
+        if (voltage < 3.0f) return "[LOW]";
+        return "[OK]";
     }
     
     const char* getTempStatus() {
-        if (temperature > OT_THRESHOLD) return "⚠️ HOT";
-        if (temperature < UT_THRESHOLD) return "⚠️ COLD";
-        if (temperature > 45.0f) return "⚠️ WARM";
-        return "✅ OK";
+        if (temperature > OT_THRESHOLD) return "[HOT]";
+        if (temperature < UT_THRESHOLD) return "[COLD]";
+        if (temperature > 45.0f) return "[WARM]";
+        return "[OK]";
     }
     
-    const char* getStateIcon() {
+    const char* getStateName() {
         switch (currentState) {
-            case IDLE: return "🟢";
-            case CHARGING: return "🔵";
-            case DISCHARGING: return "🟡";
-            case BALANCING: return "🟠";
-            case FAULT: return "🔴";
-            default: return "⚪";
-        }
-    }
-    
-    void printStateName() {
-        switch (currentState) {
-            case IDLE: Serial.print("IDLE (Ready)"); break;
-            case CHARGING: Serial.print("CHARGING"); break;
-            case DISCHARGING: Serial.print("DISCHARGING"); break;
-            case BALANCING: Serial.print("BALANCING"); break;
-            case FAULT: Serial.print("FAULT - ACTION REQUIRED!"); break;
+            case IDLE: return "IDLE";
+            case BALANCING: return "BALANCING";
+            case FAULT: return "FAULT";
+            default: return "UNKNOWN";
         }
     }
     
     void printFaultName() {
-         printFaultName(currentFault);
-     }
-     
-     void printFaultName(FaultType faultType) {
-         switch (faultType) {
-             case FAULT_OV: Serial.print("OVER-VOLTAGE (>4.25V)"); break;
-             case FAULT_UV: Serial.print("UNDER-VOLTAGE (<2.8V)"); break;
-             case FAULT_OT: Serial.print("OVER-TEMPERATURE (>60°C)"); break;
-             case FAULT_UT: Serial.print("UNDER-TEMPERATURE (<0°C)"); break;
-             default: Serial.print("NONE");
-         }
-     }
-
-      // ============ LED Bar Graph Control ============
-       void updateLEDbarGraph() {
-          // Find minimum cell voltage for critical cell indication
-          float minCellVoltage = *std::min_element(cellVoltages, cellVoltages + 4);
-          float minCellSoC = 0.0f;
-
-          // Calculate SoC for minimum cell (more accurate than average)
-          if (minCellVoltage >= 4.20f) minCellSoC = 100.0f;
-          else if (minCellVoltage <= 3.00f) minCellSoC = 0.0f;
-          else {
-              minCellSoC = ((minCellVoltage - 3.00f) / 1.20f) * 100.0f;
-          }
-
-          // Map minimum cell SoC to LED bar segments (0-10)
-          int segments = map(minCellSoC, 0, 100, 0, 10);
-
-          // Create 16-bit pattern for two cascaded shift registers
-          // SR1: bits 0-7 (segments 1-8)
-          // SR2: bits 8-15 (segments 9-10, plus unused bits)
-          uint16_t pattern = 0;
-
-          // Light up segments from bottom to top based on SoC
-          for (int i = 0; i < segments; i++) {
-              pattern |= (1 << i);  // Set bit i
-          }
-
-          // Send pattern to shift registers
-          digitalWrite(SR_LATCH_PIN, LOW);  // Disable output
-
-          // Send 16 bits (LSB first - corrected for this circuit)
-          for (int i = 0; i < 16; i++) {
-              digitalWrite(SR_DATA_PIN, (pattern & (1 << i)) ? HIGH : LOW);
-              digitalWrite(SR_CLOCK_PIN, HIGH);
-              digitalWrite(SR_CLOCK_PIN, LOW);
-          }
-
-          digitalWrite(SR_LATCH_PIN, HIGH);  // Enable output
-      }
-
-
-
-       void simulateMotorLoadEffects() {
-           if (stepperSpeed > 0) {
-               // Realistic motor load simulation (engineering approximation)
-               estimated_motor_current_ma = map(stepperSpeed, 1, 100, 80, 450);  // 80-450mA typical stepper range
-               estimated_motor_power_w = (estimated_motor_current_ma / 1000.0f) * 3.3f;  // P = I * V
-
-               // SoC drain proportional to load (1% per minute at 100% load)
-               soc_decay_rate = (stepperSpeed / 100.0f) * 1.0f;  // 0-1% per minute
-
-               // Motor generates heat at high loads
-               if (stepperSpeed > 70) {
-                   motor_heat_generation += 0.05f;  // 0.05°C per update at high load
-               }
-
-               // Step frequency calculation for telemetry
-               motor_step_frequency_hz = 1000.0f / stepDelay;
-               total_motor_steps++;
-
-           } else {
-               estimated_motor_current_ma = 0;
-               estimated_motor_power_w = 0.0f;
-               soc_decay_rate = 0.0f;
-               motor_heat_generation = 0.0f;
-           }
-       }
-
-       void updateStepperMotor() {
-           if (stepperSpeed == 0) {
-               stopStepperMotor();
-               return;
-           }
-
-           unsigned long currentTime = millis();
-           stepDelay = map(stepperSpeed, 1, 100, 50, 2);  // Faster at higher speed
-
-           if (currentTime - lastStepperStep >= stepDelay) {
-                // Set coil states for current step using actual biaxial motor pins
-                // Map step pattern [A1+, A1-, A2+, A2-] for biaxial stepper
-                digitalWrite(STEPPER_A1_PLUS,  stepperSteps[stepperStepIndex][0]);
-                digitalWrite(STEPPER_A1_MINUS, stepperSteps[stepperStepIndex][1]);
-                digitalWrite(STEPPER_A2_PLUS,  stepperSteps[stepperStepIndex][2]);
-                digitalWrite(STEPPER_A2_MINUS, stepperSteps[stepperStepIndex][3]);
-
-              // Move to next step
-              stepperStepIndex = (stepperStepIndex + stepperDirection + 8) % 8;
-              lastStepperStep = currentTime;
-           }
-
-           // Update load simulation every time
-           simulateMotorLoadEffects();
-       }
+        switch (currentFault) {
+            case FAULT_OV: Serial.print("OVER-VOLTAGE"); break;
+            case FAULT_UV: Serial.print("UNDER-VOLTAGE"); break;
+            case FAULT_OT: Serial.print("OVER-TEMPERATURE"); break;
+            case FAULT_UT: Serial.print("UNDER-TEMPERATURE"); break;
+            default: Serial.print("NONE");
+        }
+    }
 };
 
 PBMSController bmsController;
-
-// Serial command processing
-void processSerialCommand() {
-    if (Serial.available()) {
-        String command = Serial.readStringUntil('\n');
-        command.trim();
-        command.toUpperCase();
-        
-        if (command == "ENABLE INJECTION") {
-            bmsController.enableFaultInjection();
-        } 
-        else if (command == "DISABLE INJECTION") {
-            bmsController.disableFaultInjection();
-        }
-        else if (command.startsWith("INJECT")) {
-            if (command.indexOf("OV") > 0) {
-                bmsController.injectFault(FAULT_OV, 4.5f, 5000);
-            }
-            else if (command.indexOf("UV") > 0) {
-                bmsController.injectFault(FAULT_UV, 2.5f, 5000);
-            }
-            else if (command.indexOf("OT") > 0) {
-                bmsController.injectFault(FAULT_OT, 75.0f, 5000);
-            }
-            else if (command.indexOf("UT") > 0) {
-                bmsController.injectFault(FAULT_UT, -10.0f, 5000);
-            }
-        }
-        else if (command == "CLEAR FAULT") {
-            bmsController.clearInjectedFault();
-        }
-        else if (command.startsWith("LOAD ")) {
-            // Format: LOAD 50 (sets load to 50%)
-            int loadValue = command.substring(5).toInt();
-            bmsController.setStepperLoad(loadValue);
-            Serial.printf("\n🔄 Load set to %d%%\n", loadValue);
-        }
-        else if (command == "STOP LOAD") {
-            bmsController.stopStepperMotor();
-            Serial.println("\n⏹️  Load stopped");
-        }
-    }
-}
 
 void setup() {
     bmsController.init();
 }
 
 void loop() {
-     processSerialCommand();
-     bmsController.run();
+    bmsController.run();
 }
