@@ -2,13 +2,15 @@
 
 **Core Battery Management System Firmware** | **ESP32-Based** | **Educational Use Only**
 
+![Circuit Diagram](sim_circuit.png)
+
 ---
 
 ## 📖 Overview
 
 pBMSLSuite-O demonstrates fundamental BMS concepts:
 - 4-cell voltage monitoring
-- State of Charge (SoC) estimation  
+- State of Charge (SoC) estimation
 - Cell balancing logic
 - Fault protection (over/under voltage, temperature)
 - Real-time telemetry
@@ -28,7 +30,14 @@ pBMSLSuite-O demonstrates fundamental BMS concepts:
 
 ---
 
-## 🔧 Hardware
+## 📦 Requirements
+
+### Components
+- ESP32 DevKit C v4
+- 4x 10kΩ potentiometers (cell voltage simulation)
+- 1x 10kΩ NTC thermistor
+- 4x 1kΩ resistors (balance outputs)
+- 1x LED (status indicator)
 
 ### Pin Mapping
 ```
@@ -37,23 +46,6 @@ Cell 2: GPIO 35    Cell 4: GPIO 26
 Temp:   GPIO 33    Status LED: GPIO 22
 Balance: GPIO 16-19
 ```
-
-### Circuit Diagram
-
-![Circuit Diagram](sim_circuit.png)
-
-*See `diagram.json` for detailed wiring.*
-
----
-
-## 📦 Requirements
-
-### Hardware
-- ESP32 DevKit C v4
-- 4x 10kΩ potentiometers (cell voltage simulation)
-- 1x 10kΩ NTC thermistor
-- 4x 1kΩ resistors (balance outputs)
-- 1x LED (status indicator)
 
 ### Software
 - **arduino-cli** - For compiling and uploading firmware
@@ -68,12 +60,7 @@ Balance: GPIO 16-19
 
 ---
 
-## 💻 Software
-
-### Build Requirements
-- NixOS with nix-shell
-- arduino-cli
-- python3 with pyserial
+## 💻 Build & Flash
 
 ### Compilation
 ```bash
@@ -83,7 +70,7 @@ Balance: GPIO 16-19
 ### Flashing
 ```bash
 nix-shell -p arduino-cli python3 python3Packages.pyserial --run "
-arduino-cli upload -p /dev/ttyUSB0 -b esp32:esp32:esp32 /home/dharrun/Projects/Local_Projects/pBMSLSuite-O/pBMSLSuite-O.ino
+arduino-cli upload -p /dev/ttyUSB0 -b esp32:esp32:esp32 pBMSLSuite-O.ino
 "
 ```
 
@@ -96,7 +83,7 @@ The system outputs comprehensive status every second:
 
 ```
 ==================================================
-              pBMSLSuite-O STATUS                 
+              pBMSLSuite-O STATUS
 ==================================================
 Time: 42 seconds
 --------------------------------------------------
@@ -140,7 +127,7 @@ THRESHOLDS:
 Adjust potentiometers to test protection:
 
 1. **Over-Voltage**: Set any cell > 4.25V
-2. **Under-Voltage**: Set any cell < 2.80V  
+2. **Under-Voltage**: Set any cell < 2.80V
 3. **Over-Temperature**: Heat thermistor > 60°C
 4. **Under-Temperature**: Cool thermistor < 0°C
 
@@ -152,9 +139,8 @@ Adjust potentiometers to test protection:
 
 ---
 
-## 📚 Educational Value
+## 📚 Learning Objectives
 
-### Learning Objectives
 - BMS firmware architecture
 - ADC filtering and calibration
 - State machine design
