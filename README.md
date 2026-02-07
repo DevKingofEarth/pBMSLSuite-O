@@ -2,8 +2,6 @@
 
 **Core Battery Management System Firmware** | **ESP32-Based** | **Educational Use Only**
 
-<img width="1328" height="770" alt="image" src="https://github.com/user-attachments/assets/87add76f-19f4-4770-9052-895e5c41ff11" />
-
 ---
 
 ## 📖 Overview
