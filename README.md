@@ -48,7 +48,10 @@ Balance: GPIO 16-19
 ```
 
 ### Circuit Diagram
-See `diagram.json` for complete wiring.
+
+![Circuit Diagram](sim_circuit.png)
+
+*See `diagram.json` for detailed wiring.*
 
 ---
 
@@ -145,13 +148,6 @@ Adjust potentiometers to test protection:
 - Fault detection algorithms
 - Serial telemetry protocols
 
-### Resume Points
-- ESP32 embedded development
-- Real-time sensor processing
-- State machine implementation
-- Battery management concepts
-- Serial communication protocols
-
 ---
 
 ## ⚠️ Important Notes
@@ -162,13 +158,13 @@ Adjust potentiometers to test protection:
 - No current sensing
 - No safety certifications
 
-**For educational use only. Commercial use prohibited.**
+> **Educational use only.**
 
 ---
 
 ## 📄 License
 
-MIT License with commercial use restriction. See `LICENSE` file.
+MIT License. See `LICENSE` file.
 
 ---
 

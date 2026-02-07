@@ -1,9 +1,0 @@
-{
-  "additionalFiles": "../..,../..",
-  "compiler.optimization_flags": "-Os",
-  "customBuildProperties": "",
-  "fqbn": "esp32:esp32:esp32",
-  "hardwareFolders": "/home/dharrun/.arduino15/packages",
-  "otherLibrariesFolders": "/home/dharrun/Arduino/libraries",
-  "sketchLocation": "/home/dharrun/Projects/Local_Projects/pBMSLSuite-O"
-}
