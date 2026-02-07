@@ -30,13 +30,6 @@ pBMSLSuite-O demonstrates fundamental BMS concepts:
 
 ## 🔧 Hardware
 
-### Required Components
-- ESP32 DevKit C v4
-- 4x 10kΩ potentiometers (cell voltage simulation)
-- 1x 10kΩ NTC thermistor
-- 4x 1kΩ resistors (balance outputs)
-- 1x LED (status indicator)
-
 ### Pin Mapping
 ```
 Cell 1: GPIO 34    Cell 3: GPIO 25
@@ -50,6 +43,28 @@ Balance: GPIO 16-19
 ![Circuit Diagram](sim_circuit.png)
 
 *See `diagram.json` for detailed wiring.*
+
+---
+
+## 📦 Requirements
+
+### Hardware
+- ESP32 DevKit C v4
+- 4x 10kΩ potentiometers (cell voltage simulation)
+- 1x 10kΩ NTC thermistor
+- 4x 1kΩ resistors (balance outputs)
+- 1x LED (status indicator)
+
+### Software
+- **arduino-cli** - For compiling and uploading firmware
+- **python3** - For serial communication
+- **pyserial** - Python library for serial monitoring (`python3 -m pip install pyserial`)
+- **Nix/NixOS** (optional) - Use `nix-shell` for easy dependency setup
+
+### Optional Tools
+- [Wokwi Simulator](https://wokwi.com/) - Run without hardware
+- Arduino IDE - Alternative to arduino-cli
+- Git - Version control
 
 ---
 
